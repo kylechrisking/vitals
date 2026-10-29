@@ -110,6 +110,11 @@ settings are matched by `name`.
 `/api/status` returns everything the page shows, as JSON, for your own
 scripts. `/healthz` answers `ok`.
 
+## What's next
+
+- Remote management: patching, installing software and a remote shell on
+  the machines the agent runs on, so Brock can fully replace Action1.
+
 ## Hacking on it
 
 ```bash
