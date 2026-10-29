@@ -20,7 +20,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 14.5px/1.45 v
 .page { max-width: 960px; margin: 0 auto; padding: 24px 16px 96px; }
 header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 h1 { margin: 0; font-size: 22px; }
-header a { color: var(--muted); font-size: 13px; }
+nav.top { display: flex; gap: 4px; }
+nav.top a { color: var(--muted); text-decoration: none; font-size: 14px; padding: 6px 10px; border-radius: 8px; }
+nav.top a[aria-current="page"] { color: var(--text); background: var(--surface); }
 nav.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 16px 0 20px; position: sticky; top: 0; background: var(--bg); padding: 8px 0; z-index: 5; }
 nav.tabs button { font: inherit; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; }
 nav.tabs button[aria-pressed="true"] { color: var(--text); border-color: var(--accent); }
@@ -79,7 +81,8 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
 </head>
 <body>
 <div class="page">
-  <header><h1 id="title">Settings</h1><span class="spacer"></span><a href="./">← Status page</a></header>
+  <header><h1 id="title">Settings</h1>
+    <nav class="top"><a href="./">Status</a><a href="settings" aria-current="page">Settings</a></nav></header>
   <div id="errors" class="errors" hidden></div>
   <nav class="tabs" id="tabs">
     <button data-tab="notify" aria-pressed="true">Notifications</button>
@@ -314,7 +317,7 @@ function ago(t) {
 }
 
 function render() {
-  $("#title").textContent = `${V.title} · Settings`;
+  $("#title").textContent = V.title;
   document.title = `Settings · ${V.title}`;
   $("#errors").hidden = !V.errors.length && V.can_save;
   $("#errors").textContent = [...(V.can_save ? [] : ["Vitals has no writable data folder (mount /data), so settings can't be saved."]), ...V.errors].join(" · ");
