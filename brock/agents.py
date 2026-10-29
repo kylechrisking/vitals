@@ -47,10 +47,12 @@ def clean_name(name) -> str | None:
 
 
 def _check(host: str, part: str, label: str, conf: dict, fail_after: int | None = None) -> Check:
+    # A problem (disk, temperature...) must look fine twice before it's "OK again", so a
+    # value sitting right at the limit doesn't send an alert every other minute.
     return Check(name=f"{host}" if not label else f"{host} · {label}", type="agent", target=host,
                  every=float(conf["every"]), fail_after=fail_after or int(conf["fail_after"]), group="Hosts",
                  notify=list(conf.get("notify") or []), public=bool(conf.get("public")), source="agent",
-                 key=f"{host}/{part}")
+                 key=f"{host}/{part}", recover_after=1 if part == "host" else 2)
 
 
 def heartbeat(host: str, conf: dict) -> Check:

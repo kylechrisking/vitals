@@ -99,7 +99,8 @@ url = "https://ntfy.sh/x"
             del os.environ["BROCK_CONFIG"], os.environ["BROCK_SECRETS"]
         self.assertEqual([c.name for c in cfg.checks], ["Router"])
         self.assertEqual(len(cfg.errors), 1)
-        self.assertEqual(cfg.notifiers, [{"name": "phone", "type": "ntfy", "url": "https://ntfy.sh/x", "token": "tk_123"}])
+        self.assertEqual(cfg.notifiers, [{"name": "phone", "type": "ntfy", "url": "https://ntfy.sh/x", "token": "tk_123",
+                                         "source": "config"}])
         self.assertEqual(cfg.tokens, {"me": "abc"})
 
 
@@ -468,6 +469,89 @@ class Agents(unittest.TestCase):
             self.assertFalse(any(k.startswith("agent:") for k in self.m.states))
         finally:
             self.m._restore()
+
+
+class SitesAndRouting(unittest.TestCase):
+    def test_site_down_only_when_members_go_down_together(self):
+        from brock.monitor import SITE_EVERY
+        pc, bhd = Check("KKINGD01", "tcp", "x", fail_after=1), Check("BHD01", "tcp", "x", fail_after=1)
+        self.m, sent = monitor(pc, bhd, sites=[{"name": "Office", "address": "203.0.113.7",
+                                                "members": ["config:KKINGD01", "BHD01"]}])
+        self.m.cfg.notifiers = [{"name": "discord", "type": "discord", "url": "x", "events": ["site"]}]
+        try:
+            t = 1000.0
+            self.m.record(pc, Result(False), t)            # one PC rebooting: not a site outage
+            for i in range(3):
+                self.m._sites(t + 20 * (i + 1))
+            self.assertEqual([e for e in sent if e["about"] == "site"], [])
+            self.assertEqual([a["check"] for a in self.m.activity], ["KKINGD01"])
+            self.assertEqual(self.m.activity[0]["sent"], [])   # logged, not sent to Discord
+            self.m.record(bhd, Result(False), t + 70)
+            for i in range(2):
+                self.m._sites(t + 80 + 20 * i)
+            [ev] = [e for e in sent if e["about"] == "site"]
+            self.assertEqual((ev["kind"], ev["check"], ev["address"]), ("down", "Office", "203.0.113.7"))
+            self.assertEqual(notify.message(ev, "T", {"down": "{name} at {address} is DOWN"})[0],
+                             "Office at 203.0.113.7 is DOWN")
+        finally:
+            self.m._restore()
+
+    def test_wants(self):
+        from brock.monitor import wants
+        ev = {"kind": "down", "about": "host", "check": "KKINGD01", "id": "agent:KKINGD01/host", "group": "Hosts"}
+        self.assertTrue(wants({}, ev))                                  # default: everything
+        self.assertFalse(wants({"events": ["site"]}, ev))
+        self.assertFalse(wants({"enabled": False}, ev))
+        self.assertTrue(wants({"only": ["KKINGD01"]}, {**ev, "id": "agent:KKINGD01/disk", "check": "KKINGD01 · disk",
+                                                       "about": "problem"}))
+        self.assertFalse(wants({"events": ["host"]}, {**ev, "kind": "reminder"}))
+        self.assertTrue(wants({"events": ["site"]}, {"kind": "test"}))
+
+    def test_mute_logs_without_sending(self):
+        c = Check("web", "http", "x", fail_after=1)
+        self.m, sent = monitor(c)
+        self.m.cfg.muted = {c.id}
+        try:
+            self.m.record(c, Result(False))
+            self.assertEqual(sent, [])
+            self.assertTrue(self.m.activity[-1]["muted"])
+        finally:
+            self.m._restore()
+
+    def test_problem_needs_two_good_readings_to_recover(self):
+        c = Check("pc · disk", "agent", "pc", fail_after=1, recover_after=2)
+        self.m, sent = monitor(c)
+        try:
+            self.m.record(c, Result(False, "F: 96%"), 1.0)
+            self.m.record(c, Result(True), 2.0)
+            self.assertEqual(self.m.states[c.id].status, "down")
+            self.m.record(c, Result(False, "F: 96%"), 3.0)
+            self.m.record(c, Result(True), 4.0)
+            self.m.record(c, Result(True), 5.0)
+            self.assertEqual([e["kind"] for e in sent], ["down", "up"])
+        finally:
+            self.m._restore()
+
+
+class SettingsDoc(unittest.TestCase):
+    def test_clean_and_masked_secrets(self):
+        from brock import settings as S
+        old = {"notifiers": [{"name": "discord", "type": "discord", "url": "https://discord.com/api/webhooks/1/abcdef"}]}
+        view = S.notifier_view(old["notifiers"][0])
+        self.assertNotIn("abcdef", view["url"][:-4])
+        doc = S.clean({"notifiers": [{**view, "events": ["site"], "format": {"down": "{name} at {address} is DOWN"}}],
+                       "sites": [{"name": "HomeLab", "members": ["a", "b", "c"], "count": 2}],
+                       "agents": {"disk_above": "95", "hosts": {"KKINGD01": {"ignore_mounts": "F:, G:"}}},
+                       "quiet": {"hours": "23:00-07:00"}}, old)
+        self.assertEqual(doc["notifiers"][0]["url"], "https://discord.com/api/webhooks/1/abcdef")
+        self.assertEqual(doc["sites"][0]["count"], 2)
+        self.assertEqual(doc["agents"]["hosts"]["KKINGD01"]["ignore_mounts"], ["F:", "G:"])
+        for bad in ({"quiet": {"hours": "late"}},
+                    {"notifiers": [{"name": "x", "type": "discord", "url": "ftp://x"}]},
+                    {"notifiers": [{"name": "x", "type": "discord", "url": "https://x", "format": {"down": "{oops}"}}]},
+                    {"sites": [{"name": "S", "members": ["a"], "count": 5}]}):
+            with self.assertRaises(S.Invalid):
+                S.clean(bad, {})
 
 
 class AgentHttp(unittest.TestCase):

@@ -89,7 +89,7 @@ def make_handler(mon: Monitor):
                 doc = json.loads(self.rfile.read(n).decode("utf-8-sig"))
             except ValueError:
                 return self._send(400, b'{"error":"not JSON"}', "application/json")
-            name = mon.agent_report(doc) if isinstance(doc, dict) else None
+            name = mon.agent_report(doc, ip=self.client_address[0]) if isinstance(doc, dict) else None
             if not name:
                 return self._send(400, b'{"error":"report needs a name (letters, digits, - _ .)"}', "application/json")
             self._send(200, json.dumps({"ok": True, "name": name}).encode(), "application/json")

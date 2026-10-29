@@ -47,6 +47,7 @@ class Check:
     public: bool = True             # listed on the public status page
     source: str = "config"          # config | sett
     key: str = ""                   # sett: the service's stable key, so two "Sonarr"s stay apart
+    recover_after: int = 1          # successes in a row before it counts as back (problems use 2: no flapping)
 
     @property
     def id(self) -> str:
@@ -60,12 +61,14 @@ class Config:
     checks: list[Check] = field(default_factory=list)
     notifiers: list[dict] = field(default_factory=list)
     sett: dict = field(default_factory=dict)
-    quiet: dict = field(default_factory=dict)            # hours = "23:00-07:00", keep = ["critical"]
+    quiet: dict = field(default_factory=dict)            # hours = "23:00-07:00"
     maintenance: list[dict] = field(default_factory=list)  # [[maintenance]] start/end (ISO), checks = [...]
     remind_every: float = 0                              # minutes between "still down" reminders (0 = never)
     public_status: bool = False                          # serve the status page without a token
     tokens: dict = field(default_factory=dict)           # name -> token for /api/* and the page
     agents: dict = field(default_factory=dict)           # [agents] host agents: token, thresholds, per-host overrides
+    muted: set = field(default_factory=set)              # check ids that never notify
+    sites: list[dict] = field(default_factory=list)      # [[site]] name, address, members (check ids or names), count
     files: dict[str, float] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)      # problems found while loading, shown on the page
 
@@ -123,6 +126,12 @@ def load() -> Config:
         cfg.notifiers.append(n)
     if os.environ.get("BROCK_NTFY_URL"):
         cfg.notifiers.append({"name": "ntfy-env", "type": "ntfy", "url": os.environ["BROCK_NTFY_URL"]})
+    cfg.sites = [s for s in raw.get("site", []) if s.get("name") and s.get("members")]
+    from . import settings   # the /settings page's changes, layered on top
+    sp = settings.path()
+    if sp:
+        cfg.files[str(sp)] = _mtime(sp)
+    settings.apply(cfg, settings.load_doc())
     for e in cfg.errors:
         log.warning("config: %s", e)
     return cfg

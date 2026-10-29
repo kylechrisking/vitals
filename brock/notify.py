@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import smtplib
 import ssl
 import time
@@ -28,11 +29,33 @@ log = logging.getLogger(__name__)
 RETRIES = (2, 10, 30)
 
 
-def message(ev: dict, title: str) -> tuple[str, str]:
-    """(subject, body) in plain words."""
+SITE_FORMAT = {"down": "{name} at {address} is DOWN", "up": "{name} at {address} is back UP",
+               "reminder": "{name} at {address} is still DOWN ({duration})"}
+
+
+def render(template: str, ev: dict, title: str) -> str:
+    """Fill {name}, {address}, {status}, {detail}, {duration}, {group}, {title}, {time}.
+    Plain substitution: nothing in a template can reach into Brock's objects."""
+    from .monitor import fmt_duration
+    fields = {"name": ev.get("check", ""), "address": ev.get("address") or ev.get("target") or "",
+              "status": {"down": "DOWN", "up": "UP", "reminder": "STILL DOWN"}.get(ev["kind"], ev["kind"].upper()),
+              "detail": ev.get("detail") or "", "duration": fmt_duration(ev.get("down_for", 0)) if ev.get("down_for") else "",
+              "group": ev.get("group") or "", "title": title,
+              "time": time.strftime("%H:%M", time.localtime(ev.get("at") or time.time()))}
+    out = re.sub(r"\{(\w+)\}", lambda m: str(fields.get(m.group(1), m.group(0))), template)
+    return re.sub(r" at  is", " is", out).strip()   # no address known: "HomeLab is DOWN"
+
+
+def message(ev: dict, title: str, fmt: dict | None = None) -> tuple[str, str]:
+    """(subject, body). A notifier's own format wins; sites default to
+    "HomeLab at 203.0.113.7 is DOWN"; everything else reads as plain sentences.
+    A templated message has no body: the line is the message."""
     from .monitor import fmt_duration
     k = ev["kind"]
     about = ev.get("about", "service")
+    template = (fmt or {}).get(k) or (SITE_FORMAT.get(k) if about == "site" else None)
+    if template and k in ("down", "up", "reminder"):
+        return render(template, ev, title), ""
     if about == "problem" and k in ("down", "up", "reminder"):
         if k == "down":
             return f"🔴 {ev['check']}: {ev.get('detail') or 'problem'}", f"{ev['check']}: {ev.get('detail') or 'problem'}."
@@ -94,7 +117,7 @@ def _priority(ev: dict, n: dict) -> int:
 
 
 def ntfy(n: dict, ev: dict, title: str) -> None:
-    subject, body = message(ev, title)
+    subject, body = message(ev, title, n.get("format"))
     headers = {"Title": _header_safe(subject),
                "Priority": str(_priority(ev, n)),
                "Tags": {"down": "rotating_light", "reminder": "rotating_light", "up": "white_check_mark"}.get(ev["kind"], "bell")}
@@ -104,7 +127,7 @@ def ntfy(n: dict, ev: dict, title: str) -> None:
         headers["Authorization"] = "Basic " + base64.b64encode(f"{n['user']}:{n.get('password', '')}".encode()).decode()
     if n.get("click"):
         headers["Click"] = n["click"]
-    _post(n["url"], body.encode(), headers)
+    _post(n["url"], (body or subject).encode(), headers)
 
 
 def _header_safe(s: str) -> str:
@@ -117,33 +140,34 @@ def _header_safe(s: str) -> str:
 
 
 def gotify(n: dict, ev: dict, title: str) -> None:
-    subject, body = message(ev, title)
-    _json(f"{n['url'].rstrip('/')}/message", {"title": subject, "message": body, "priority": _priority(ev, n)},
+    subject, body = message(ev, title, n.get("format"))
+    _json(f"{n['url'].rstrip('/')}/message", {"title": subject, "message": body or subject, "priority": _priority(ev, n)},
           {"X-Gotify-Key": n["token"]})
 
 
 def discord(n: dict, ev: dict, title: str) -> None:
-    subject, body = message(ev, title)
-    _json(n["url"], {"content": f"**{subject}**\n{body}"[:2000], "username": n.get("username", "Brock")})
+    subject, body = message(ev, title, n.get("format"))
+    text = f"**{subject}**\n{body}" if body else subject
+    _json(n["url"], {"content": text[:2000], "username": n.get("username", "Brock")})
 
 
 def slack(n: dict, ev: dict, title: str) -> None:
-    subject, body = message(ev, title)
-    _json(n["url"], {"text": f"*{subject}*\n{body}"})
+    subject, body = message(ev, title, n.get("format"))
+    _json(n["url"], {"text": f"*{subject}*\n{body}" if body else subject})
 
 
 def webhook(n: dict, ev: dict, title: str) -> None:
-    subject, body = message(ev, title)
-    _json(n["url"], {**ev, "title": subject, "message": body, "source": title}, n.get("headers"))
+    subject, body = message(ev, title, n.get("format"))
+    _json(n["url"], {**ev, "title": subject, "message": body or subject, "source": title}, n.get("headers"))
 
 
 def email(n: dict, ev: dict, title: str) -> None:
-    subject, body = message(ev, title)
+    subject, body = message(ev, title, n.get("format"))
     msg = EmailMessage()
     msg["Subject"], msg["From"] = subject, n.get("from") or n.get("user")
     to = n["to"] if isinstance(n["to"], list) else [n["to"]]
     msg["To"] = ", ".join(to)
-    msg.set_content(body)
+    msg.set_content(body or subject)
     port = int(n.get("port", 587))
     ctx = ssl.create_default_context()
     if port == 465:

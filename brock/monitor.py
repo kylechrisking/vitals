@@ -15,6 +15,7 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -23,12 +24,15 @@ from pathlib import Path
 from . import agents, checks, notify
 from .config import Check, Config, data_dir
 from .sett import SettFeed
+from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
 BUCKET = 3600              # uptime is kept per hour...
 KEEP_BUCKETS = 24 * 90     # ...for 90 days
 KEEP_INCIDENTS = 500
+KEEP_ACTIVITY = 500
+SITE_EVERY = 15            # seconds between site evaluations
 SAVE_EVERY = 60
 
 
@@ -36,6 +40,7 @@ SAVE_EVERY = 60
 class State:
     status: str = "pending"          # pending | up | down
     fails: int = 0
+    oks: int = 0                     # successes in a row (for recover_after)
     since: float = 0                 # when the current status began
     last_run: float = 0
     detail: str = ""
@@ -57,7 +62,8 @@ class Monitor:
         self.states: dict[str, State] = {}
         self.incidents: list[dict] = []
         self.held: list[dict] = []       # alerts held back by quiet hours
-        self.hosts: dict[str, dict] = {}  # agent name -> {"last": time, "report": doc, "summary": str}
+        self.hosts: dict[str, dict] = {}  # agent name -> {"last": time, "report": doc, "summary": str, "ip": str}
+        self.activity: deque = deque(maxlen=KEEP_ACTIVITY)   # every alert, sent or not, newest last
         self.lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=32, thread_name_prefix="check")
         self.running: set[str] = set()
@@ -75,11 +81,46 @@ class Monitor:
             out += self.sett.checks()
         for name, h in list(self.hosts.items()):
             out += [c for c, _ in agents.evaluate(name, h["report"], agents.host_conf(self.cfg.agents, name))]
+        out += [site_check(s) for s in self.cfg.sites]
         return out
+
+    # ---- sites ---------------------------------------------------------------------------
+
+    def _members(self, site: dict, by_id: dict[str, Check]) -> list[Check]:
+        """A site's members: check ids, or names (case-insensitive) for hand-written configs."""
+        by_name = {c.name.lower(): c for c in by_id.values()}
+        out = []
+        for m in site.get("members") or []:
+            c = by_id.get(m) or by_name.get(str(m).lower())
+            if c and c.source != "site":
+                out.append(c)
+        return out
+
+    def _sites(self, now: float) -> None:
+        """A site is down when at least `count` of its members are down at the same time
+        (all of them, if count isn't set). One machine rebooting is not a site outage."""
+        if not self.cfg.sites:
+            return
+        by_id = self.by_id()
+        for site in self.cfg.sites:
+            c = site_check(site)
+            st = self.states.setdefault(c.id, State(since=now))
+            if now - st.last_run < SITE_EVERY:
+                continue
+            st.last_run = now
+            members = self._members(site, by_id)
+            if not members:
+                continue
+            down = [m for m in members if (self.states.get(m.id) or State()).status == "down"
+                    and not self.in_maintenance(m, now)]
+            need = min(int(site.get("count") or len(members)), len(members))
+            detail = (f"{len(down)} of {len(members)} down: {', '.join(m.name for m in down)}" if down
+                      else f"all {len(members)} up")
+            self.record(c, checks.Result(len(down) < need, detail), now)
 
     # ---- host agents -------------------------------------------------------------------
 
-    def agent_report(self, doc: dict, now: float | None = None) -> str | None:
+    def agent_report(self, doc: dict, now: float | None = None, ip: str | None = None) -> str | None:
         """Take one agent report: remember the host and record each of its checks."""
         now = now or time.time()
         name = agents.clean_name(doc.get("name"))
@@ -88,7 +129,8 @@ class Monitor:
         conf = agents.host_conf(self.cfg.agents, name)
         with self.lock:
             new = name not in self.hosts
-            self.hosts[name] = {"last": now, "report": doc, "summary": agents.summary(doc)}
+            self.hosts[name] = {"last": now, "report": doc, "summary": agents.summary(doc),
+                                "ip": ip or (self.hosts.get(name) or {}).get("ip")}
         if new:
             log.info("agent: %s reporting (%s, agent %s)", name, doc.get("os"), doc.get("agent"))
         for c, r in agents.evaluate(name, doc, conf):
@@ -152,6 +194,7 @@ class Monitor:
                 st.last_run = now
             self.pool.submit(self._run, c)
         self._agent_heartbeats(now)
+        self._sites(now)
         self._remind(now)
         self._flush_held(now)
 
@@ -198,6 +241,11 @@ class Monitor:
                 log.warning("config not reloaded: %s", e)
                 self.cfg.files = {f: config._mtime(Path(f)) for f in self.cfg.files}
                 continue
+            self.apply_config(new)
+
+    def apply_config(self, new: Config) -> None:
+        """Switch to a new config (file edited, or saved from the settings page)."""
+        if True:
             new.port = self.cfg.port
             sett_changed = new.sett != self.cfg.sett
             self.cfg = new
@@ -231,7 +279,10 @@ class Monitor:
                     del st.buckets[old]
             if r.ok:
                 st.fails = 0
-                if st.status != "up":
+                st.oks += 1
+                if st.status == "down" and st.oks < c.recover_after:
+                    pass   # one good reading isn't a recovery yet
+                elif st.status != "up":
                     was_down = st.status == "down"
                     if was_down and st.incident is not None:
                         self.incidents[st.incident]["end"] = now
@@ -239,6 +290,7 @@ class Monitor:
                         event = self._event("up", c, st, now)
                     st.status, st.since, st.alerted, st.incident = "up", now, False, None
             else:
+                st.oks = 0
                 st.fails += 1
                 if st.fails >= c.fail_after and st.status != "down":
                     st.status, st.since = "down", now
@@ -260,8 +312,8 @@ class Monitor:
             self.dispatch(event, c, now)
 
     def _event(self, kind: str, c: Check, st: State, now: float) -> dict:
-        ev = {"kind": kind, "check": c.name, "group": c.group, "type": c.type, "target": c.target,
-              "detail": st.detail, "at": now, "about": about(c)}
+        ev = {"kind": kind, "check": c.name, "id": c.id, "group": c.group, "type": c.type, "target": c.target,
+              "address": self.address(c), "detail": st.detail, "at": now, "about": about(c)}
         if kind in ("up", "reminder"):
             ev["down_for"] = now - (self.incidents[st.incident]["start"] if st.incident is not None else st.since)
         return ev
@@ -303,16 +355,37 @@ class Monitor:
         return a <= t < b if a < b else t >= a or t < b
 
     def dispatch(self, ev: dict, c: Check, now: float) -> None:
-        targets = [n for n in self.cfg.notifiers if not c.notify or n["name"] in c.notify]
-        if self.quiet(now):
-            loud = [n for n in targets if n.get("ignore_quiet")]
+        """Send an alert to every notifier that wants it, and log it either way."""
+        muted = c.id in self.cfg.muted
+        targets = [] if muted else [n for n in self.cfg.notifiers
+                                    if (not c.notify or n["name"] in c.notify) and wants(n, ev)]
+        held: list[str] = []
+        if targets and self.quiet(now):
             held = [n["name"] for n in targets if not n.get("ignore_quiet")]
             if held:
                 with self.lock:
                     self.held.append({**ev, "notifiers": held})
-            targets = loud
+            targets = [n for n in targets if n.get("ignore_quiet")]
+        with self.lock:
+            self.activity.append({k: ev.get(k) for k in ("kind", "about", "check", "id", "address", "detail", "at",
+                                                        "down_for")}
+                                 | {"sent": [n["name"] for n in targets], "held": held, "muted": muted})
         for n in targets:
             self.pool.submit(notify.send, n, ev, self.cfg.title)
+
+    def address(self, c: Check) -> str:
+        """Where a check points, for messages: a host's IP, a URL's host, a host:port's host."""
+        if c.source == "agent":
+            return (self.hosts.get(c.target) or {}).get("ip") or c.target
+        if c.source == "site":
+            if c.target:
+                return c.target
+            members = self._members(next((s for s in self.cfg.sites if s["name"] == c.name), {}), self.by_id())
+            return next((a for a in (self.address(m) for m in members) if a), "")
+        t = c.target
+        if "://" in t:
+            return urlparse(t).hostname or t
+        return t.rsplit(":", 1)[0] if t.count(":") == 1 else t
 
     def _flush_held(self, now: float) -> None:
         if not self.held or self.quiet(now):
@@ -393,6 +466,7 @@ class Monitor:
             return
         with self.lock:
             doc = {"v": 1, "saved": time.time(), "incidents": self.incidents, "hosts": self.hosts,
+                   "activity": list(self.activity),
                    "states": {k: s.to_json() for k, s in self.states.items()}}
         tmp = f"{self.state_file}.tmp"
         try:
@@ -410,6 +484,7 @@ class Monitor:
             self.incidents = list(doc.get("incidents", []))[-KEEP_INCIDENTS:]
             self.hosts = {k: v for k, v in (doc.get("hosts") or {}).items()
                           if isinstance(v, dict) and "last" in v and isinstance(v.get("report"), dict)}
+            self.activity.extend(a for a in doc.get("activity") or [] if isinstance(a, dict))
             open_by_id = {i["id"]: n for n, i in enumerate(self.incidents) if i.get("end") is None and "id" in i}
             for cid, d in doc.get("states", {}).items():
                 st = State(status=d.get("status", "pending"), since=float(d.get("since", 0)),
@@ -426,9 +501,35 @@ class Monitor:
             log.warning("could not read %s: %s", self.state_file, e)
 
 
+def site_check(site: dict) -> Check:
+    return Check(name=site["name"], type="site", target=site.get("address") or "", every=SITE_EVERY,
+                 fail_after=2, group="Sites", source="site", key=site["name"], public=bool(site.get("public", True)))
+
+
+def wants(n: dict, ev: dict) -> bool:
+    """Does notifier n take this alert? Its `events` (default: all of them) name
+    the kinds it takes; `only` limits it to some checks, hosts, sites or groups."""
+    from .settings import EVENTS
+    if not n.get("enabled", True):
+        return False
+    if ev["kind"] == "test":
+        return True
+    events = n.get("events")
+    events = EVENTS if events is None else events
+    if ev["kind"] == "digest":
+        return "digest" in events
+    if ev.get("about", "service") not in events or (ev["kind"] == "reminder" and "reminder" not in events):
+        return False
+    only = n.get("only") or []
+    host = str(ev.get("id", "")).split(":", 1)[-1].split("/", 1)[0] if ev.get("id", "").startswith("agent:") else None
+    return not only or any(x in only for x in (ev.get("id"), ev.get("check"), ev.get("group"), host) if x)
+
+
 def about(c: Check) -> str:
     """How to word an alert: "service" (is down / back up), "host" (stopped
     reporting), or "problem" (a disk, a certificate, a failing drive: something wrong, not something gone)."""
+    if c.source == "site":
+        return "site"
     if c.source == "agent":
         return "host" if c.key.endswith("/host") else "problem"
     if c.type == "tls" or c.key.startswith("node:"):
