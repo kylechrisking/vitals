@@ -32,7 +32,7 @@ from .config import Check
 DEFAULTS = {"every": 60, "missed": 3, "disk_above": 90, "disk_days": 7, "memory_above": 0, "temp_above": 85, "services": True,
             "updates_above": 0, "defender": True, "ignore_mounts": [], "ignore_services": [], "notify": [],
             "public": False, "fail_after": 2}
-AGENT_VERSION = "0.3.1"       # what agent.py and agent.ps1 say; agents that differ update themselves
+AGENT_VERSION = "0.3.2"       # what agent.py and agent.ps1 say; agents that differ update themselves
 FORGET_AFTER = 30 * 86400     # a host silent this long is dropped (and stops alerting)
 MAX_NAME = 64
 

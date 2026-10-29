@@ -8,7 +8,7 @@
 param([switch]$Once)
 
 $ErrorActionPreference = 'Stop'
-$Version = '0.3.1'
+$Version = '0.3.2'
 $Dir = Join-Path $env:ProgramData 'Vitals'
 $Config = Get-Content -Raw (Join-Path $Dir 'config.json') | ConvertFrom-Json
 $Server = $Config.server.TrimEnd('/')

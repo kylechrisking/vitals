@@ -74,7 +74,10 @@ $trayAction = New-ScheduledTaskAction -Execute 'powershell.exe' `
     -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$TrayDir\tray.ps1`""
 $traySettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName $tray -Action $trayAction -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Settings $traySettings `
+# At sign-in, then every 5 minutes: if the dot was closed or crashed it comes back (a second copy just exits).
+$trayTrigger = New-ScheduledTaskTrigger -AtLogOn
+$trayTrigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)).Repetition
+Register-ScheduledTask -TaskName $tray -Action $trayAction -Trigger $trayTrigger -Settings $traySettings `
     -Principal (New-ScheduledTaskPrincipal -GroupId $usersName -RunLevel Limited) | Out-Null
 try { Start-ScheduledTask -TaskName $tray } catch { Write-Host 'The tray icon appears at your next sign-in.' }
 

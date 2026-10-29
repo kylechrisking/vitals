@@ -7,6 +7,32 @@ $ErrorActionPreference = 'Continue'
 $Dir = Join-Path $env:ProgramData 'VitalsTray'
 $StatusFile = Join-Path $Dir 'status.json'
 $Wake = Join-Path $Dir 'wake'
+$Mine = Join-Path $env:LOCALAPPDATA 'Vitals'          # this user's: the log, and "hidden until sign-in"
+New-Item -ItemType Directory -Force -Path $Mine | Out-Null
+$Log = Join-Path $Mine 'tray.log'
+$HiddenFile = Join-Path $Mine 'hidden'
+
+function Write-Log([string]$Msg) {
+    try {
+        if ((Test-Path $Log) -and (Get-Item $Log).Length -gt 256KB) { Remove-Item $Log -Force }
+        Add-Content -Path $Log -Value "$(Get-Date -Format s)  $Msg"
+    } catch { }
+}
+
+# The current sign-in, told apart by when this session's Explorer started.
+function Get-SessionMark {
+    $sid = [Diagnostics.Process]::GetCurrentProcess().SessionId
+    $e = Get-Process explorer -ErrorAction SilentlyContinue | Where-Object { $_.SessionId -eq $sid } |
+        Sort-Object StartTime | Select-Object -First 1
+    if ($e) { $e.StartTime.ToUniversalTime().ToString('o') } else { '' }
+}
+
+# One dot per sign-in: the task re-runs this every few minutes in case it stopped.
+$created = $false
+$mutex = New-Object Threading.Mutex($true, 'Local\VitalsTray', [ref]$created)
+if (-not $created) { exit 0 }
+# "Hide this icon" holds until the next sign-in.
+if ((Test-Path $HiddenFile) -and ((Get-Content -Raw $HiddenFile).Trim() -eq (Get-SessionMark))) { exit 0 }
 
 function New-DotIcon([string]$Hex) {
     $bmp = New-Object Drawing.Bitmap 16, 16
@@ -40,7 +66,16 @@ $tray.ContextMenuStrip = $menu
 $script:Asked = $null    # when "Check in now" was clicked, to confirm when it lands
 $script:Last = 0
 
+$script:Explorer = Get-SessionMark
 function Update-View {
+    # Explorer restarted (crash, update): it forgot every tray icon, so put ours back.
+    $mark = Get-SessionMark
+    if ($mark -and $mark -ne $script:Explorer) {
+        $script:Explorer = $mark
+        $tray.Visible = $false
+        $tray.Visible = $true
+        Write-Log 'Explorer restarted; icon shown again'
+    }
     $s = Read-Status
     if (-not $s) {
         $tray.Icon = $Icons.idle
@@ -89,12 +124,23 @@ $openPage = {
 }
 $open.add_Click($openPage)
 $tray.add_DoubleClick($openPage)
-$hide.add_Click({ $tray.Visible = $false; [Windows.Forms.Application]::Exit() })
+$hide.add_Click({
+    try { Set-Content -Path $HiddenFile -Value (Get-SessionMark) } catch { }
+    $tray.Visible = $false
+    [Windows.Forms.Application]::Exit()
+})
 
 $timer = New-Object Windows.Forms.Timer
 $timer.Interval = 3000
-$timer.add_Tick({ Update-View })
+$timer.add_Tick({ try { Update-View } catch { Write-Log "update failed: $_" } })
 $timer.Start()
 Update-View
-[Windows.Forms.Application]::Run()
-$tray.Dispose()
+Write-Log 'started'
+try {
+    [Windows.Forms.Application]::Run()
+} catch {
+    Write-Log "stopped: $_"
+} finally {
+    $tray.Dispose()
+    $mutex.ReleaseMutex()
+}
