@@ -133,7 +133,24 @@ def make_handler(mon: Monitor):
         def do_PUT(self):
             self._settings_write("PUT")
 
+        def _push(self) -> bool:
+            """/api/push/<token>[?status=fail&msg=...]: a scheduled job checking in. The
+            token is the only credential, so curl/wget from a cron job just works."""
+            u = urlparse(self.path)
+            if not u.path.startswith("/api/push/"):
+                return False
+            q = parse_qs(u.query)
+            ok = (q.get("status", ["ok"])[0]).lower() not in ("fail", "failed", "error", "down", "1")
+            name = mon.push(u.path[len("/api/push/"):].strip("/"), ok, q.get("msg", [""])[0])
+            if not name:
+                self._send(404, b"unknown check-in URL\n", "text/plain")
+            else:
+                self._send(200, f"ok: {name}\n".encode(), "text/plain; charset=utf-8")
+            return True
+
         def do_POST(self):
+            if self._push():
+                return
             if urlparse(self.path).path.startswith("/api/settings"):
                 return self._settings_write("POST")
             if urlparse(self.path).path != "/api/report":
@@ -162,6 +179,8 @@ def make_handler(mon: Monitor):
             u = urlparse(self.path)
             if u.path == "/healthz":
                 return self._send(200, b"ok", "text/plain")
+            if self._push():
+                return
             token = parse_qs(u.query).get("token", [None])[0]
             if u.path in AGENT_FILES:
                 if not self._agent_token_ok(token) or not re.fullmatch(r"[A-Za-z0-9._~+/=-]+", token):
@@ -210,7 +229,9 @@ def settings_view(mon: Monitor) -> dict:
     by_id = {r["id"]: r for r in st["checks"]}
     checks_out = [{"id": c.id, "name": c.name, "group": c.group or ("Hosts" if c.source == "agent" else ""),
                    "source": c.source, "type": c.type, "status": (by_id.get(c.id) or {}).get("status", "pending"),
-                   "from_page": c.source == "config" and c.name in {d["name"] for d in doc.get("checks") or []}}
+                   "from_page": c.source == "config" and c.name in {d["name"] for d in doc.get("checks") or []},
+                   "push_path": f"/api/push/{mon.push_token(c)}" if c.type == "push" else None,
+                   "every": c.every, "grace": mon.grace(c) if c.type == "push" else None}
                   for c in mon.all_checks()]
     return {
         "doc": doc,
@@ -229,6 +250,8 @@ def settings_view(mon: Monitor) -> dict:
                    "detail": (by_id.get(f"site:{s['name']}") or {}).get("detail", ""),
                    "from_page": s["name"] in {x["name"] for x in doc.get("sites") or []}} for s in cfg.sites],
         "quiet": cfg.quiet, "remind_every": cfg.remind_every,
+        "maintenance_file": [{k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in w.items()}
+                             for w in cfg.maintenance if w not in (doc.get("maintenance") or [])],
         "can_save": settings.path() is not None, "title": cfg.title, "errors": cfg.errors,
     }
 

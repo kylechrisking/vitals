@@ -48,6 +48,15 @@ every = 3600
 fail_after = 1
 group = "Public"
 
+# A scheduled job that checks in: Vitals alerts if it hasn't within `every` seconds
+# (plus a grace period). The settings page shows the URL to call, e.g. at the end
+# of a backup script:  curl -fsS -m 10 --retry 3 http://vitals:8098/api/push/<token>
+[[check]]
+name = "Nightly backup"
+type = "push"
+every = 86400
+group = "Backups"
+
 [[check]]
 name = "Printer"
 type = "tcp"
@@ -123,6 +132,14 @@ url = "https://ntfy.sh/my-lab-alerts-change-this"
 # hours = "23:00-07:00"
 
 # Planned work: checks still run, nothing alerts, and it doesn't count against uptime.
+# Repeating (local time; days optional, default every day):
+# [[maintenance]]
+# name = "Nightly backups"
+# days = ["mon", "tue", "wed", "thu", "fri"]
+# from = "03:00"
+# to = "03:30"
+# checks = ["Backups"]       # names or groups; leave out for everything
+# One-off:
 # [[maintenance]]
 # start = 2026-11-02T01:00:00
 # end = 2026-11-02T03:00:00

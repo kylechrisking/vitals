@@ -645,6 +645,73 @@ class SettingsApi(unittest.TestCase):
         self.assertEqual((status, items[0]["check"]), (200, "Plex"))
 
 
+class CheckIns(unittest.TestCase):
+    def test_missed_check_in_alerts_and_ping_recovers(self):
+        c = Check("PBS backup", "push", "", every=86400, fail_after=1)
+        self.m, sent = monitor(c)
+        self.m.cfg.push_secret = "s"
+        try:
+            t0 = self.m.started
+            token = self.m.push_token(c)
+            self.assertEqual(token, self.m.push_token(c))          # stable
+            self.assertIsNone(self.m.push("wrong", now=t0))
+            self.assertEqual(self.m.push(token, now=t0 + 10), "PBS backup")
+            self.m.tick(t0 + 86400)                                 # within the grace period
+            self.assertEqual(sent, [])
+            self.m.tick(t0 + 90100)                                 # 10s past every + 1h grace
+            self.assertEqual([(e["kind"], e["detail"]) for e in sent], [("down", "no check-in for 1 day 1h")])
+            self.m.push(token, now=t0 + 90200)
+            self.assertEqual(sent[-1]["kind"], "up")
+            self.m.push(token, ok=False, msg="pbs: datastore full", now=t0 + 90210)
+            self.assertEqual((sent[-1]["kind"], sent[-1]["detail"]), ("down", "pbs: datastore full"))
+        finally:
+            self.m._restore()
+
+    def test_push_endpoint(self):
+        c = Check("TheTree snapshot", "push", "", every=3600, fail_after=1)
+        m, _ = monitor(c)
+        m.cfg.push_secret = "s"
+        httpd, base = serve(make_handler(m))
+        try:
+            with urllib.request.urlopen(f"{base}/api/push/{m.push_token(c)}", timeout=5) as r:
+                self.assertEqual(r.read(), b"ok: TheTree snapshot\n")
+            with self.assertRaises(urllib.error.HTTPError):
+                urllib.request.urlopen(f"{base}/api/push/nope", timeout=5)
+            self.assertEqual(m.states[c.id].status, "up")
+        finally:
+            stop(httpd)
+            m._restore()
+
+
+class Maintenance(unittest.TestCase):
+    def test_daily_and_overnight_windows(self):
+        from vitals.monitor import _in_daily_window
+        at = lambda d, h, mi: datetime(2026, 11, d, h, mi).timestamp()   # noqa: E731 (Nov 2 2026 is a Monday)
+        self.assertTrue(_in_daily_window(at(2, 3, 10), [], "03:00", "03:30"))
+        self.assertFalse(_in_daily_window(at(2, 3, 30), [], "03:00", "03:30"))
+        self.assertFalse(_in_daily_window(at(2, 3, 10), ["sun"], "03:00", "03:30"))
+        self.assertTrue(_in_daily_window(at(1, 23, 45), ["sun"], "23:30", "01:00"))     # Sunday night...
+        self.assertTrue(_in_daily_window(at(2, 0, 30), ["sun"], "23:30", "01:00"))      # ...into Monday
+        self.assertFalse(_in_daily_window(at(3, 0, 30), ["sun"], "23:30", "01:00"))
+
+    def test_window_silences_matching_checks_only(self):
+        a, b = Check("PBS", "tcp", "x", group="Backups"), Check("Plex", "tcp", "x")
+        m, _ = monitor(a, b, maintenance=[{"from": "00:00", "to": "23:59", "checks": ["Backups"]}])
+        try:
+            now = datetime(2026, 11, 2, 12, 0).timestamp()
+            self.assertTrue(m.in_maintenance(a, now))
+            self.assertFalse(m.in_maintenance(b, now))
+        finally:
+            m._restore()
+
+    def test_settings_validate_windows(self):
+        from vitals import settings as S
+        doc = S.clean({"maintenance": [{"name": "Backups", "days": ["mon", "xyz"], "from": "03:00", "to": "03:30"}]}, {})
+        self.assertEqual(doc["maintenance"][0]["days"], ["mon"])
+        with self.assertRaises(S.Invalid):
+            S.clean({"maintenance": [{"from": "3am", "to": "04:00"}]}, {})
+
+
 class AgentFiles(unittest.TestCase):
     def test_versions_agree(self):
         """The server offers AGENT_VERSION; both agents must say the same, or they'd update forever."""

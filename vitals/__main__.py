@@ -43,6 +43,9 @@ def check_once(cfg: config.Config) -> int:
         return 1
     bad = 0
     for c in cfg.checks:
+        if c.type == "push":
+            print(f"--    {c.name:<28} push  (waits for the job to check in)")
+            continue
         r = checks.run(c)
         bad += not r.ok
         ms = f" {r.latency_ms} ms" if r.latency_ms is not None else ""

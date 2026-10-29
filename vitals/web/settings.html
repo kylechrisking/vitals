@@ -86,7 +86,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
     <button data-tab="sites">Sites</button>
     <button data-tab="hosts">Hosts</button>
     <button data-tab="checks">Checks</button>
-    <button data-tab="quiet">Quiet hours</button>
+    <button data-tab="quiet">Quiet &amp; maintenance</button>
     <button data-tab="activity">Activity</button>
   </nav>
 
@@ -138,6 +138,11 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
       <label class="f">Quiet hours (e.g. 23:00-07:00, empty for none)<input type="text" id="quiet-hours" placeholder="23:00-07:00"></label>
       <label class="f">"Still down" reminder every (minutes, 0 = never)<input type="number" id="remind-every" min="0"></label>
     </div></div>
+    <h2 style="margin-top:24px">Maintenance windows</h2>
+    <p class="lead">Repeating times when things are expected to go down, like nightly backups or a reboot window. Checks still
+      run and show, but nothing alerts and it doesn't count against uptime.</p>
+    <div id="maint"></div>
+    <div class="row-actions"><button class="btn" id="add-maint">Add a window</button></div>
   </section>
 
   <section id="tab-activity" hidden>
@@ -164,7 +169,7 @@ let dirty = false;
 function normalize(view) {
   const d = clone(view.doc || {});
   d.notifiers ||= []; d.routing ||= {}; d.agents ||= {}; d.agents.hosts ||= {}; d.sites ||= []; d.checks ||= [];
-  d.muted ||= []; d.quiet ||= {}; d.remind_every ??= view.remind_every || 0;
+  d.muted ||= []; d.quiet ||= {}; d.remind_every ??= view.remind_every || 0; d.maintenance ||= [];
   if (!view.doc.quiet && view.quiet) d.quiet = clone(view.quiet);
   // Notifiers from vitals.toml are edited through routing: start from what they do now.
   for (const n of view.notifiers.filter((n) => n.source === "config")) {
@@ -297,6 +302,11 @@ function hostMuted(h) {
   return ids.length && ids.every((id) => D.muted.includes(id));
 }
 
+function hours(s) {
+  if (!s) return "";
+  return s >= 86400 && s % 86400 === 0 ? `${s / 86400} day${s === 86400 ? "" : "s"}` : s >= 3600 ? `${+(s / 3600).toFixed(1)}h` : `${Math.round(s / 60)}m`;
+}
+
 function ago(t) {
   if (!t) return "never";
   const s = Math.max(0, Date.now() / 1000 - t);
@@ -342,8 +352,12 @@ function render() {
         ${agentFields(h.name, o, { ...V.agents, ...D.agents }, h.name)}</div></details></div>`;
   }).join("") : `<div class="card empty">No agents have reported yet. Install one with the line from the Vitals README.</div>`;
 
+  const pushLine = (c) => c.push_path ? `<div class="lead" style="margin:6px 0 0">The job calls this when it finishes
+      (every ${esc(hours(c.every))}, ${esc(hours(c.grace))} grace):</div>
+      <div class="cmd" style="margin-bottom:0"><input type="text" readonly value="${esc(`curl -fsS -m 10 --retry 3 ${location.origin}${c.push_path}`)}"><button class="btn" data-copy>Copy</button></div>
+      <div class="lead" style="margin:4px 0 0">If the job fails, call it with <code>?status=fail</code> instead.</div>` : "";
   $("#checks").innerHTML = V.checks.filter((c) => c.source !== "site").map((c) => `<tr>
-      <td><span class="dot ${esc(c.status)}"></span>${esc(c.name)}</td><td class="hide-sm">${esc(c.group || "")}</td>
+      <td><span class="dot ${esc(c.status)}"></span>${esc(c.name)}${pushLine(c)}</td><td class="hide-sm">${esc(c.group || "")}</td>
       <td><input type="checkbox" data-mute="${esc(c.id)}" ${D.muted.includes(c.id) ? "checked" : ""} aria-label="Mute ${esc(c.name)}"></td>
       <td>${c.from_page ? `<button class="btn danger" data-del-check="${esc(c.name)}">Remove</button>` : ""}</td></tr>`).join("")
     + D.checks.filter((d) => !V.checks.some((c) => c.name === d.name)).map((d) => `<tr><td>${esc(d.name)} <span class="badge">not saved yet</span></td>
@@ -351,11 +365,28 @@ function render() {
   $("#add-check-card").innerHTML = `<div class="card-head"><b>Add a check</b></div><div class="grid">
       <label class="f">Name<input type="text" id="nc-name" placeholder="Plex"></label>
       <label class="f">Type<select id="nc-type"><option value="http">Website (HTTP)</option><option value="tcp">Port (TCP)</option>
-        <option value="ping">Ping</option><option value="dns">DNS name</option><option value="tls">Certificate expiry</option></select></label>
-      <label class="f">Address<input type="text" id="nc-target" placeholder="http://plex.homelab or 10.0.0.130:32400"></label>
+        <option value="ping">Ping</option><option value="dns">DNS name</option><option value="tls">Certificate expiry</option>
+        <option value="push">Check-in from a scheduled job</option></select></label>
+      <label class="f">Address (not for check-ins)<input type="text" id="nc-target" placeholder="http://plex.homelab or 10.0.0.130:32400"></label>
+      <label class="f">Check-ins: expected every (hours)<input type="number" id="nc-hours" min="0.1" step="0.5" value="24"></label>
       <label class="f">Group<input type="text" id="nc-group" placeholder="Media"></label>
     </div><div class="row-actions"><button class="btn" id="add-check">Add</button></div>`;
 
+  const DAYS = [["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"], ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"]];
+  $("#maint").innerHTML = (V.maintenance_file || []).map((w) => `<div class="card"><div class="card-head"><b>${esc(w.name || "Window")}</b>
+      <span class="badge">from vitals.toml</span></div><div class="lead" style="margin:0">${esc(w.from ? `${(w.days || []).join(", ") || "every day"} ${w.from}-${w.to}` : `${w.start} to ${w.end}`)}${
+      (w.checks || []).length ? ` · ${esc(w.checks.join(", "))}` : " · everything"}</div></div>`).join("")
+    + (D.maintenance.length ? D.maintenance.map((w, i) => `<div class="card">
+      <div class="card-head"><b>${esc(w.name || "Window")}</b><span class="spacer"></span><button class="btn danger" data-del-maint="${i}">Remove</button></div>
+      <div class="grid">
+        <label class="f">Name<input type="text" data-mw="${i}" data-f="name" value="${esc(w.name)}" placeholder="Nightly backups"></label>
+        <label class="f">From<input type="time" data-mw="${i}" data-f="from" value="${esc(w.from)}"></label>
+        <label class="f">To<input type="time" data-mw="${i}" data-f="to" value="${esc(w.to)}"></label>
+        <label class="f">Only for (checks, hosts' checks or groups; empty = everything)<input type="text" data-mw="${i}" data-f="checks" data-list value="${esc((w.checks || []).join(", "))}" placeholder="everything"></label>
+      </div>
+      <div class="checks" style="grid-auto-flow:column;justify-content:start;gap:14px;margin-top:10px">${DAYS.map(([d, l]) =>
+        `<label class="check"><input type="checkbox" data-mday="${i}" value="${d}" ${!(w.days || []).length || w.days.includes(d) ? "checked" : ""}> ${l}</label>`).join("")}</div>
+    </div>`).join("") : `<div class="card empty">No maintenance windows.</div>`);
   $("#quiet-hours").value = D.quiet.hours || "";
   $("#remind-every").value = D.remind_every || 0;
 }
@@ -408,6 +439,8 @@ document.addEventListener("input", (e) => {
     if (v === null || (Array.isArray(v) && !v.length && el.dataset.agent !== "*")) delete t[el.dataset.f]; else t[el.dataset.f] = v;
   } else if (el.dataset.site !== undefined && el.dataset.f) {
     D.sites[+el.dataset.site][el.dataset.f] = el.dataset.f === "count" ? Number(el.value) : el.value;
+  } else if (el.dataset.mw !== undefined) {
+    D.maintenance[+el.dataset.mw][el.dataset.f] = valueOf(el);
   } else if (el.id === "quiet-hours") {
     D.quiet = el.value.trim() ? { hours: el.value.trim() } : {};
   } else if (el.id === "remind-every") {
@@ -434,6 +467,12 @@ document.addEventListener("change", (e) => {
     site.members = [...s];
     site.count = Math.min(site.count || site.members.length, site.members.length) || site.members.length;
     render();
+  } else if (el.dataset.mday !== undefined) {
+    const w = D.maintenance[+el.dataset.mday];
+    const all = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    const s = new Set((w.days || []).length ? w.days : all);
+    el.checked ? s.add(el.value) : s.delete(el.value);
+    w.days = s.size === 7 ? [] : all.filter((d) => s.has(d));   // all seven = every day
   } else if (el.dataset.mute) {
     const s = new Set(D.muted);
     el.checked ? s.add(el.dataset.mute) : s.delete(el.dataset.mute);
@@ -479,12 +518,15 @@ document.addEventListener("click", async (e) => {
     touch(); render(); return;
   }
   if (b.dataset.delNotifier !== undefined) { D.notifiers.splice(+b.dataset.delNotifier, 1); touch(); render(); return; }
+  if (b.id === "add-maint") { D.maintenance.push({ name: "", days: [], from: "03:00", to: "03:30", checks: [] }); touch(); render(); return; }
+  if (b.dataset.delMaint !== undefined) { D.maintenance.splice(+b.dataset.delMaint, 1); touch(); render(); return; }
   if (b.id === "add-site") { D.sites.push({ name: "", address: "", members: [], count: 1 }); touch(); render(); return; }
   if (b.dataset.delSite !== undefined) { D.sites.splice(+b.dataset.delSite, 1); touch(); render(); return; }
   if (b.id === "add-check") {
     const c = { name: $("#nc-name").value.trim(), type: $("#nc-type").value, target: $("#nc-target").value.trim(),
                 group: $("#nc-group").value.trim(), every: 60, fail_after: 3 };
-    if (!c.name || !c.target) return alert("A check needs a name and an address.");
+    if (c.type === "push") Object.assign(c, { target: "", every: Math.round(Number($("#nc-hours").value || 24) * 3600), fail_after: 1 });
+    if (!c.name || (!c.target && c.type !== "push")) return alert("A check needs a name and an address.");
     D.checks.push(c); touch(); render(); return;
   }
   if (b.dataset.delCheck) { D.checks = D.checks.filter((c) => c.name !== b.dataset.delCheck); touch(); render(); return; }
@@ -517,7 +559,7 @@ addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); });
 
 (async () => {
   const r = await fetch("api/settings", { cache: "no-store" });
-  if (!r.ok) { document.body.innerHTML = `<div class="page"><h1>Settings</h1><p class="lead">Open this page as /settings?token=… with one of Vitals's [tokens].</p></div>`; return; }
+  if (!r.ok) { document.body.innerHTML = `<div class="page"><h1>Settings</h1><p class="lead">Open this page as /settings?token=… with one of Vitals' [tokens].</p></div>`; return; }
   V = await r.json();
   D = normalize(V);
   render();

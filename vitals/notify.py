@@ -35,7 +35,7 @@ SITE_FORMAT = {"down": "{name} at {address} is DOWN", "up": "{name} at {address}
 
 def render(template: str, ev: dict, title: str) -> str:
     """Fill {name}, {address}, {status}, {detail}, {duration}, {group}, {title}, {time}.
-    Plain substitution: nothing in a template can reach into Vitals's objects."""
+    Plain substitution: nothing in a template can reach into Vitals' objects."""
     from .monitor import fmt_duration
     fields = {"name": ev.get("check", ""), "address": ev.get("address") or ev.get("target") or "",
               "status": {"down": "DOWN", "up": "UP", "reminder": "STILL DOWN"}.get(ev["kind"], ev["kind"].upper()),

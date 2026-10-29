@@ -36,6 +36,7 @@ ROUTE_KEYS = {"enabled", "events", "only", "format", "ignore_quiet"}
 AGENT_KEYS = {"every", "missed", "disk_above", "memory_above", "temp_above", "updates_above", "services", "defender",
               "ignore_mounts", "ignore_services", "public"}
 MASK = "••••"
+DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
 def path() -> Path | None:
@@ -80,7 +81,7 @@ def ensure_tokens(cfg: Config) -> dict:
     except (OSError, ValueError):
         made = {}
     changed = False
-    for key in ("page", "agent"):
+    for key in ("page", "agent", "push"):
         if not made.get(key):
             made[key] = secrets.token_urlsafe(24)
             changed = True
@@ -89,6 +90,7 @@ def ensure_tokens(cfg: Config) -> dict:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(made, fh)
     used = {}
+    cfg.push_secret = made["push"]
     if not cfg.tokens:
         cfg.tokens = {"page": made["page"]}
         used["page"] = made["page"]
@@ -127,6 +129,8 @@ def apply(cfg: Config, doc: dict) -> Config:
     have_sites = {s["name"] for s in cfg.sites}
     cfg.sites += [s for s in doc.get("sites") or [] if s.get("name") not in have_sites]
 
+    cfg.maintenance = list(cfg.maintenance) + [w for w in doc.get("maintenance") or [] if isinstance(w, dict)]
+
     have = {c.name for c in cfg.checks}
     for d in doc.get("checks") or []:
         if d.get("name") in have:
@@ -134,7 +138,8 @@ def apply(cfg: Config, doc: dict) -> Config:
         cfg.checks.append(Check(name=d["name"], type=d["type"], target=d["target"], every=float(d.get("every", 60)),
                                 fail_after=int(d.get("fail_after", 3)), group=d.get("group", ""),
                                 contains=d.get("contains", ""), expect=d.get("expect", ""),
-                                warn_days=int(d.get("warn_days", 14)), public=bool(d.get("public", True))))
+                                warn_days=int(d.get("warn_days", 14)), public=bool(d.get("public", True)),
+                                grace=float(d.get("grace", 0))))
         have.add(d["name"])
     return cfg
 
@@ -204,6 +209,18 @@ def clean(new: dict, old: dict) -> dict:
         out["sites"].append({"name": name, "address": str(s.get("address") or "").strip()[:100],
                              "members": members, "count": count})
 
+    out["maintenance"] = []
+    for i, w in enumerate(new.get("maintenance") or []):
+        label = str(w.get("name") or f"window {i + 1}").strip()[:64]
+        days = [d for d in w.get("days") or [] if d in DAYS]
+        for k in ("from", "to"):
+            if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(w.get(k) or "")):
+                raise Invalid(f"maintenance {label}: times look like 03:00")
+        if w["from"] == w["to"]:
+            raise Invalid(f"maintenance {label}: start and end are the same")
+        out["maintenance"].append({"name": label, "days": days, "from": w["from"], "to": w["to"],
+                                   "checks": [str(x) for x in w.get("checks") or [] if str(x).strip()]})
+
     out["checks"] = []
     names = set()
     for d in new.get("checks") or []:
@@ -214,10 +231,11 @@ def clean(new: dict, old: dict) -> dict:
         if d.get("type") not in CHECK_TYPES:
             raise Invalid(f"{name}: pick a check type ({', '.join(CHECK_TYPES)})")
         target = str(d.get("target") or "").strip()
-        if not target:
+        if not target and d["type"] != "push":
             raise Invalid(f"{name}: what should it check? (an address, URL or host:port)")
         out["checks"].append({"name": name, "type": d["type"], "target": target,
-                              "every": _num(d.get("every", 60), f"{name}: interval", 10, 86400),
+                              "every": _num(d.get("every", 60), f"{name}: interval", 10, 31 * 86400),
+                              "grace": _num(d.get("grace") or 0, f"{name}: grace", 0, 7 * 86400),
                               "fail_after": int(_num(d.get("fail_after", 3), f"{name}: failures", 1, 100)),
                               "group": str(d.get("group") or "")[:40], "contains": str(d.get("contains") or ""),
                               "expect": str(d.get("expect") or ""), "warn_days": int(d.get("warn_days") or 14),

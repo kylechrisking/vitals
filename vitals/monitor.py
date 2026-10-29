@@ -41,6 +41,7 @@ class State:
     status: str = "pending"          # pending | up | down
     fails: int = 0
     oks: int = 0                     # successes in a row (for recover_after)
+    last_ping: float = 0             # push checks: the last check-in
     since: float = 0                 # when the current status began
     last_run: float = 0
     detail: str = ""
@@ -51,7 +52,7 @@ class State:
     buckets: dict[int, list[int]] = field(default_factory=dict)   # hour -> [ok, total]
 
     def to_json(self) -> dict:
-        d = {k: getattr(self, k) for k in ("status", "since", "detail", "alerted", "last_reminder")}
+        d = {k: getattr(self, k) for k in ("status", "since", "detail", "alerted", "last_reminder", "last_ping")}
         d["buckets"] = {str(k): v for k, v in self.buckets.items()}
         return d
 
@@ -187,6 +188,9 @@ class Monitor:
         now = now or time.time()
         for c in self.cfg.checks:
             st = self.states.setdefault(c.id, State(since=now))
+            if c.type == "push":
+                self._push_due(c, st, now)
+                continue
             with self.lock:
                 if c.id in self.running or now - st.last_run < c.every:
                     continue
@@ -197,6 +201,44 @@ class Monitor:
         self._sites(now)
         self._remind(now)
         self._flush_held(now)
+
+    # ---- check-ins from scheduled jobs -----------------------------------------------------
+
+    def push_token(self, c: Check) -> str:
+        """The secret in a check-in URL: the check's own token, else one derived from the
+        check's name and this install's secret (stable across restarts)."""
+        if c.token:
+            return c.token
+        import base64
+        import hashlib
+        import hmac as _hmac
+        mac = _hmac.new(self.cfg.push_secret.encode(), c.name.encode(), hashlib.sha256).digest()
+        return base64.urlsafe_b64encode(mac).decode()[:22]
+
+    def push(self, token: str, ok: bool = True, msg: str = "", now: float | None = None) -> str | None:
+        """A job checked in. Returns the check's name, or None for an unknown token."""
+        import hmac as _hmac
+        now = now or time.time()
+        for c in self.cfg.checks:
+            if c.type == "push" and _hmac.compare_digest(self.push_token(c), token):
+                st = self.states.setdefault(c.id, State(since=now))
+                st.last_ping = st.last_run = now
+                self.record(c, checks.Result(ok, msg[:200] or ("checked in" if ok else "the job reported a failure")), now)
+                return c.name
+        return None
+
+    @staticmethod
+    def grace(c: Check) -> float:
+        return c.grace or min(3600.0, max(300.0, c.every * 0.1))
+
+    def _push_due(self, c: Check, st: State, now: float) -> None:
+        """No check-in within every + grace: that's a failure, recorded at most every few minutes."""
+        last = st.last_ping or self.started
+        late = now - last
+        if late > c.every + self.grace(c) and now - st.last_run >= min(c.every, 300):
+            st.last_run = now
+            word = "no check-in yet" if not st.last_ping else f"no check-in for {fmt_duration(late)}"
+            self.record(c, checks.Result(False, word), now)
 
     def _run(self, c: Check) -> None:
         try:
@@ -332,15 +374,20 @@ class Monitor:
     # ---- maintenance and quiet hours -------------------------------------------------------
 
     def in_maintenance(self, c: Check, now: float) -> bool:
+        """One-off windows (start/end) and repeating ones (days + from/to, local time)."""
         for w in self.cfg.maintenance:
+            names = w.get("checks") or []
+            if names and not (c.name in names or c.group in names or c.id in names):
+                continue
+            if "from" in w:
+                if _in_daily_window(now, w.get("days") or [], w["from"], w["to"]):
+                    return True
+                continue
             try:
-                start = _when(w["start"])
-                end = _when(w["end"])
+                if _when(w["start"]) <= now < _when(w["end"]):
+                    return True
             except (KeyError, ValueError):
                 continue
-            names = w.get("checks") or []
-            if start <= now < end and (not names or c.name in names or c.group in names):
-                return True
         return False
 
     def quiet(self, now: float) -> bool:
@@ -489,7 +536,7 @@ class Monitor:
             for cid, d in doc.get("states", {}).items():
                 st = State(status=d.get("status", "pending"), since=float(d.get("since", 0)),
                            detail=d.get("detail", ""), alerted=bool(d.get("alerted")),
-                           last_reminder=float(d.get("last_reminder", 0)),
+                           last_reminder=float(d.get("last_reminder", 0)), last_ping=float(d.get("last_ping", 0)),
                            buckets={int(k): list(v) for k, v in d.get("buckets", {}).items()})
                 if st.status == "down":
                     # Still down across a restart: keep the outage open and don't alert again.
@@ -535,6 +582,25 @@ def about(c: Check) -> str:
     if c.type == "tls" or c.key.startswith("node:"):
         return "problem"
     return "service"
+
+
+_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def _in_daily_window(now: float, days: list[str], start: str, end: str) -> bool:
+    """Is `now` inside from-to on one of `days` (all days if empty)? A window like
+    23:30-01:00 belongs to the day it starts on."""
+    try:
+        a = datetime.strptime(start, "%H:%M").time()
+        b = datetime.strptime(end, "%H:%M").time()
+    except ValueError:
+        return False
+    t = datetime.fromtimestamp(now)
+    today, yesterday = _DAYS[t.weekday()], _DAYS[(t.weekday() - 1) % 7]
+    on = lambda d: not days or d in days   # noqa: E731
+    if a < b:
+        return on(today) and a <= t.time() < b
+    return (on(today) and t.time() >= a) or (on(yesterday) and t.time() < b)
 
 
 def _when(v) -> float:

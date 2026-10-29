@@ -26,7 +26,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-CHECK_TYPES = ("http", "tcp", "ping", "dns", "tls")
+CHECK_TYPES = ("http", "tcp", "ping", "dns", "tls", "push")   # push: a scheduled job checks in
 NOTIFY_TYPES = ("ntfy", "gotify", "discord", "slack", "webhook", "email")
 
 
@@ -42,6 +42,8 @@ class Check:
     contains: str = ""              # http: body must contain this
     expect: str = ""                # dns: an address the name must resolve to
     warn_days: int = 14             # tls: alert when the certificate expires sooner than this
+    grace: float = 0                # push: extra time after `every` before a missed check-in counts (0 = automatic)
+    token: str = ""                 # push: the secret part of its check-in URL (default: derived)
     group: str = ""                 # shown on the status page
     notify: list[str] = field(default_factory=list)   # notifier names; [] means all
     public: bool = True             # listed on the public status page
@@ -68,6 +70,7 @@ class Config:
     tokens: dict = field(default_factory=dict)           # name -> token for /api/* and the page
     agents: dict = field(default_factory=dict)           # [agents] host agents: token, thresholds, per-host overrides
     muted: set = field(default_factory=set)              # check ids that never notify
+    push_secret: str = ""                                # derives check-in URLs (kept in tokens.json)
     made_tokens: dict = field(default_factory=dict)      # tokens Vitals made itself (no [tokens] / [agents] token)
     sites: list[dict] = field(default_factory=list)      # [[site]] name, address, members (check ids or names), count
     files: dict[str, float] = field(default_factory=dict)
@@ -109,7 +112,9 @@ def load() -> Config:
     seen = set()
     for i, d in enumerate(raw.get("check", [])):
         name, kind, target = d.get("name"), d.get("type", "http"), d.get("target") or d.get("url")
-        if not name or not target or kind not in CHECK_TYPES:
+        if kind == "push":
+            target = target or ""   # nothing to reach: the job calls us
+        if not name or (not target and kind != "push") or kind not in CHECK_TYPES:
             cfg.errors.append(f"[[check]] #{i + 1}: needs name, target and a type from {', '.join(CHECK_TYPES)}")
             continue
         if name in seen:
@@ -123,6 +128,7 @@ def load() -> Config:
             expect_status=[int(x) for x in (expect if isinstance(expect, list) else [expect])],
             contains=d.get("contains", ""), expect=d.get("expect", ""), warn_days=int(d.get("warn_days", 14)),
             group=d.get("group", ""), notify=list(d.get("notify", [])), public=bool(d.get("public", True)),
+            grace=float(d.get("grace", 0)), token=str(d.get("token", "")),
         ))
 
     # Notifiers: settings from the config, credentials from the secrets file by the same name.

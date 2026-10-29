@@ -25,6 +25,9 @@ backups), without you listing any of it.
   expiry.
 - **Host agents** for Linux and Windows: disk space, memory, temperature,
   failed services, pending updates, Defender (see below).
+- **Check-ins from scheduled jobs:** backups, snapshots, renders. Each gets
+  a URL to call when it finishes; if it doesn't check in on time, you hear
+  about it. Add `?status=fail` to report a failure yourself.
 - **Alerts that don't nag:** a check is down only after a few failures in a
   row (you choose how many), you get one alert when it goes down and one
   when it's back ("Plex is back after 12m"), plus optional reminders while
@@ -33,7 +36,8 @@ backups), without you listing any of it.
   Slack webhooks, like Mattermost), email, or any webhook as JSON.
 - **Quiet hours:** alerts overnight are held and sent as one summary in the
   morning, saying what's still down. Individual notifiers can opt out.
-- **Maintenance windows:** checks keep running, nothing alerts, and planned
+- **Maintenance windows,** one-off or repeating (every night 03:00-03:30,
+  weekdays only...): checks keep running, nothing alerts, and planned
   downtime doesn't count against uptime.
 - **Status page:** 24-hour, 7, 30 and 90-day uptime, a 30-day bar per check,
   and recent incidents. Private by default (token), or public, in which case
@@ -154,7 +158,7 @@ api_tokens = { vitals = "a-long-random-string" }
 and point Vitals at it:
 
 ```toml
-# Vitals's vitals.toml
+# Vitals' vitals.toml
 [sett]
 url = "http://sett.lan:8099"
 token = "a-long-random-string"
