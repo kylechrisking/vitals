@@ -1,0 +1,97 @@
+# Brock config. Mount as /config/brock.toml. Edits apply within a few seconds.
+
+title = "Home lab"
+# public_status = true      # anyone can see the page (public checks only, no addresses or errors)
+# remind_every = 60         # minutes between "still down" reminders (0 = never)
+
+# Tokens for the status page and /api/status. Better kept in the secrets file.
+# Open the page once as http://brock:8098/?token=... and a cookie remembers it.
+[tokens]
+me = "change-me-to-something-long"
+
+# ---- what to watch -------------------------------------------------------------
+
+# Everything Sett discovered, without listing it again. Optional.
+# If Sett has sign-in, give it an API token there:  [auth] api_tokens = { brock = "..." }
+[sett]
+url = "http://192.168.1.30:8099"
+# token = "..."              # better in the secrets file
+# every = 30                 # seconds between reads
+# fail_after = 2             # reads in a row a service must be down before it alerts
+# exclude = ["flaresolverr"] # app ids, names or categories to leave out
+# node_health = true         # failing disks, degraded pools, failed backups from Proxmox
+# public = true              # list Sett's services on a public status page
+
+# Your own checks. type: http | tcp | ping | dns | tls
+[[check]]
+name = "Router"
+type = "ping"
+target = "192.168.1.1"
+group = "Network"
+
+[[check]]
+name = "Website"
+type = "http"
+target = "https://example.com"
+contains = "Welcome"        # optional: the page must contain this
+# expect_status = [200]     # optional: default is any status below 400
+every = 60                  # seconds (default 60)
+fail_after = 3              # failures in a row before it's down (default 3)
+group = "Public"
+
+[[check]]
+name = "Website certificate"
+type = "tls"
+target = "example.com:443"
+warn_days = 14              # alert this many days before it expires
+every = 3600
+fail_after = 1
+group = "Public"
+
+[[check]]
+name = "Printer"
+type = "tcp"
+target = "192.168.1.50:9100"
+public = false              # not shown on a public status page
+notify = ["phone"]          # only these notifiers (default: all)
+
+[[check]]
+name = "Pi-hole DNS"
+type = "dns"
+target = "nas.home.lan"
+expect = "192.168.1.20"     # optional: must resolve to this
+
+# ---- where alerts go ---------------------------------------------------------------
+
+[[notify]]
+name = "phone"
+type = "ntfy"
+url = "https://ntfy.sh/my-lab-alerts-change-this"
+# token = "tk_..."          # or user/password, for a protected topic
+# ignore_quiet = true       # still alert during quiet hours
+
+# [[notify]]
+# name = "discord"
+# type = "discord"           # also: slack, gotify, webhook, email
+# url = "https://discord.com/api/webhooks/..."
+
+# [[notify]]
+# name = "mail"
+# type = "email"
+# host = "smtp.example.com"
+# port = 587
+# user = "alerts@example.com"
+# password = "..."           # better in the secrets file
+# to = ["you@example.com"]
+
+# ---- when not to alert --------------------------------------------------------------
+
+# Hold alerts overnight and send one summary when quiet hours end.
+# [quiet]
+# hours = "23:00-07:00"
+
+# Planned work: checks still run, nothing alerts, and it doesn't count against uptime.
+# [[maintenance]]
+# start = 2026-11-02T01:00:00
+# end = 2026-11-02T03:00:00
+# checks = ["NAS", "Network"]   # names or groups; leave out for everything

@@ -1,0 +1,406 @@
+"""Offline tests: config, checks against local servers, the up/down logic,
+quiet hours, maintenance, persistence, the Sett feed, notifiers and the page."""
+import json
+import os
+import socket
+import tempfile
+import threading
+import time
+import unittest
+import urllib.error
+import urllib.request
+from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+TMP = tempfile.mkdtemp(prefix="brock-test-")
+os.environ["BROCK_DATA"] = TMP
+
+from brock import checks, config, notify  # noqa: E402
+from brock.checks import Result  # noqa: E402
+from brock.config import Check, Config  # noqa: E402
+from brock.monitor import Monitor, fmt_duration  # noqa: E402
+from brock.server import make_handler  # noqa: E402
+from brock.sett import SettFeed  # noqa: E402
+
+
+class Now:
+    """An executor that runs work immediately, so alerts can be asserted on."""
+    def submit(self, fn, *a, **k):
+        fn(*a, **k)
+
+
+class Fake(BaseHTTPRequestHandler):
+    """A tiny local web server: GET answers from `routes`, POSTs are recorded."""
+    routes: dict = {}
+    posts: list = []
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        code, body, headers = self.routes.get(self.path.split("?")[0], (404, b"nope", {}))
+        self.send_response(code)
+        for k, v in headers.items():
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        self.posts.append((self.path, dict(self.headers), self.rfile.read(n)))
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+
+def serve(handler):
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, f"http://127.0.0.1:{httpd.server_address[1]}"
+
+
+def stop(httpd):
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class ConfigLoad(unittest.TestCase):
+    def test_checks_notifiers_and_secrets(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "brock.toml").write_text('''
+title = "Lab"
+[[check]]
+name = "Router"
+type = "ping"
+target = "10.0.0.1"
+[[check]]
+name = "Broken"
+type = "carrier-pigeon"
+target = "x"
+[[notify]]
+name = "phone"
+type = "ntfy"
+url = "https://ntfy.sh/x"
+''')
+        (d / "secrets.toml").write_text('[[notify]]\nname = "phone"\ntoken = "tk_123"\n[tokens]\nme = "abc"\n')
+        os.environ.update(BROCK_CONFIG=str(d / "brock.toml"), BROCK_SECRETS=str(d / "secrets.toml"))
+        try:
+            cfg = config.load()
+        finally:
+            del os.environ["BROCK_CONFIG"], os.environ["BROCK_SECRETS"]
+        self.assertEqual([c.name for c in cfg.checks], ["Router"])
+        self.assertEqual(len(cfg.errors), 1)
+        self.assertEqual(cfg.notifiers, [{"name": "phone", "type": "ntfy", "url": "https://ntfy.sh/x", "token": "tk_123"}])
+        self.assertEqual(cfg.tokens, {"me": "abc"})
+
+
+class Checks(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        Fake.routes = {"/ok": (200, b"hello world", {}), "/err": (503, b"down", {})}
+        cls.httpd, cls.base = serve(Fake)
+
+    @classmethod
+    def tearDownClass(cls):
+        stop(cls.httpd)
+
+    def test_http(self):
+        self.assertTrue(checks.run(Check("a", "http", f"{self.base}/ok")).ok)
+        self.assertFalse(checks.run(Check("a", "http", f"{self.base}/err")).ok)
+        self.assertTrue(checks.run(Check("a", "http", f"{self.base}/err", expect_status=[503])).ok)
+        r = checks.run(Check("a", "http", f"{self.base}/ok", contains="goodbye"))
+        self.assertFalse(r.ok)
+        self.assertIn("doesn't contain", r.detail)
+
+    def test_tcp(self):
+        port = self.httpd.server_address[1]
+        self.assertTrue(checks.run(Check("a", "tcp", f"127.0.0.1:{port}")).ok)
+        self.assertFalse(checks.run(Check("a", "tcp", f"127.0.0.1:{free_port()}", timeout=1)).ok)
+        self.assertFalse(checks.run(Check("a", "tcp", "no-port-here")).ok)
+
+    def test_dns(self):
+        self.assertTrue(checks.run(Check("a", "dns", "localhost")).ok)
+        self.assertFalse(checks.run(Check("a", "dns", "localhost", expect="10.9.9.9")).ok)
+
+    def test_ping_without_ping_binary_is_a_clear_failure(self):
+        r = checks.run(Check("a", "ping", "127.0.0.1", timeout=1))
+        self.assertTrue(r.ok or "reply" in r.detail or "ping" in r.detail)
+
+    def test_cert_expiry_reader(self):
+        import shutil
+        import subprocess
+        if not shutil.which("openssl"):
+            self.skipTest("openssl not installed")
+        d = tempfile.mkdtemp()
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "10", "-subj", "/CN=t",
+                        "-keyout", f"{d}/k.pem", "-out", f"{d}/c.pem"], check=True, capture_output=True)
+        import ssl
+        der = ssl.PEM_cert_to_DER_cert(Path(f"{d}/c.pem").read_text())
+        days = (checks.cert_not_after(der) - time.time()) / 86400
+        self.assertTrue(9 < days <= 10)
+
+    def test_tls_against_local_server(self):
+        import shutil
+        import ssl
+        import subprocess
+        if not shutil.which("openssl"):
+            self.skipTest("openssl not installed")
+        d = tempfile.mkdtemp()
+        subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "5", "-subj", "/CN=t",
+                        "-keyout", f"{d}/k.pem", "-out", f"{d}/c.pem"], check=True, capture_output=True)
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(f"{d}/c.pem", f"{d}/k.pem")
+        httpd = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            port = httpd.server_address[1]
+            r = checks.run(Check("a", "tls", f"127.0.0.1:{port}", warn_days=14))
+            self.assertFalse(r.ok)
+            self.assertIn("expires in 4 days", r.detail)
+            self.assertTrue(checks.run(Check("a", "tls", f"127.0.0.1:{port}", warn_days=2)).ok)
+        finally:
+            stop(httpd)
+
+
+def monitor(*cs, **kw) -> tuple[Monitor, list]:
+    sent = []
+    cfg = Config(checks=list(cs), notifiers=[{"name": "n", "type": "webhook", "url": "x"}], **kw)
+    m = Monitor(cfg)
+    m.state_file = None
+    m.pool = Now()
+    notify_send = notify.send
+
+    def capture(n, ev, title="Brock"):
+        sent.append(ev)
+    notify.send = capture
+    m._restore = lambda: setattr(notify, "send", notify_send)
+    return m, sent
+
+
+class UpDown(unittest.TestCase):
+    def tearDown(self):
+        if hasattr(self, "m"):
+            self.m._restore()
+
+    def test_down_after_fail_after_then_one_recovery(self):
+        c = Check("web", "http", "x", fail_after=3)
+        self.m, sent = monitor(c)
+        t = 1_000_000.0
+        self.m.record(c, Result(True), t)
+        self.m.record(c, Result(False, "boom"), t + 1)
+        self.m.record(c, Result(False, "boom"), t + 2)
+        self.assertEqual(sent, [])
+        self.m.record(c, Result(False, "boom"), t + 3)
+        self.m.record(c, Result(False, "boom"), t + 4)
+        self.assertEqual([e["kind"] for e in sent], ["down"])
+        self.m.record(c, Result(True), t + 63)
+        self.assertEqual([e["kind"] for e in sent], ["down", "up"])
+        self.assertEqual(sent[1]["down_for"], 60)
+        self.assertEqual(len(self.m.incidents), 1)
+        self.assertEqual(self.m.incidents[0]["end"], t + 63)
+
+    def test_maintenance_is_silent_and_not_counted(self):
+        c = Check("nas", "http", "x", fail_after=1)
+        now = datetime.now()
+        self.m, sent = monitor(c, maintenance=[{"start": (now - timedelta(hours=1)).isoformat(),
+                                                "end": (now + timedelta(hours=1)).isoformat(), "checks": ["nas"]}])
+        self.m.record(c, Result(False, "rebooting"))
+        self.m.record(c, Result(True))
+        self.assertEqual(sent, [])
+        self.assertIsNone(self.m.uptime(self.m.states[c.id], 24))
+        self.assertTrue(self.m.incidents[0]["maintenance"])
+
+    def test_quiet_hours_hold_then_digest(self):
+        c = Check("web", "http", "x", fail_after=1)
+        self.m, sent = monitor(c)
+        quiet = [True]
+        self.m.quiet = lambda now: quiet[0]
+        self.m.record(c, Result(False, "boom"))
+        self.assertEqual(sent, [])
+        self.assertEqual(len(self.m.held), 1)
+        quiet[0] = False
+        self.m._flush_held(time.time())
+        self.assertEqual(sent[0]["kind"], "digest")
+        self.assertEqual(sent[0]["still_down"], ["web"])
+
+    def test_quiet_window_parsing(self):
+        self.m, _ = monitor(quiet={"hours": "23:00-07:00"})
+        at = lambda h: datetime(2026, 1, 1, h, 30).timestamp()  # noqa: E731
+        self.assertTrue(self.m.quiet(at(23)))
+        self.assertTrue(self.m.quiet(at(3)))
+        self.assertFalse(self.m.quiet(at(12)))
+
+    def test_reminders(self):
+        c = Check("web", "http", "x", fail_after=1)
+        self.m, sent = monitor(c, remind_every=30)
+        self.m.record(c, Result(False, "boom"), 1000.0)
+        self.m._remind(1000.0 + 29 * 60)
+        self.m._remind(1000.0 + 31 * 60)
+        self.assertEqual([e["kind"] for e in sent], ["down", "reminder"])
+
+    def test_notifier_routing(self):
+        c = Check("web", "http", "x", fail_after=1, notify=["other"])
+        self.m, sent = monitor(c)
+        self.m.record(c, Result(False))
+        self.assertEqual(sent, [])
+
+    def test_uptime_and_bars(self):
+        c = Check("web", "http", "x")
+        self.m, _ = monitor(c)
+        now = time.time()
+        for i in range(10):
+            self.m.record(c, Result(i != 0), now)
+        st = self.m.states[c.id]
+        self.assertEqual(self.m.uptime(st, 24, now), 90.0)
+        bars = self.m.bars(st, now)
+        self.assertEqual((len(bars), bars[-1], bars[0]), (30, 90.0, None))
+
+    def test_restart_keeps_outage_without_alerting_again(self):
+        c = Check("web", "http", "x", fail_after=1)
+        self.m, sent = monitor(c)
+        self.m.state_file = Path(TMP) / "state-test.json"
+        self.m.record(c, Result(False, "boom"))
+        self.m.save()
+        self.m._restore()
+        m2, sent2 = monitor(c)
+        self.m = m2
+        m2.state_file = Path(TMP) / "state-test.json"
+        m2.load()
+        m2.record(c, Result(False, "boom"))
+        self.assertEqual(sent2, [])
+        m2.record(c, Result(True))
+        self.assertEqual([e["kind"] for e in sent2], ["up"])
+        self.assertIsNotNone(m2.incidents[0]["end"])
+
+
+class SettFeedTests(unittest.TestCase):
+    def test_reads_services_and_node_health(self):
+        doc = {"services": [
+            {"key": "sonarr@pve:lxc/105", "name": "Sonarr", "host": "media", "app": "sonarr", "category": "Media",
+             "status": "down", "error": "no response"},
+            {"key": "a@h", "name": "Docs", "app": "manual", "category": "Links", "status": "unknown"},
+            {"key": "f@h", "name": "FlareSolverr", "app": "flaresolverr", "category": "Apps", "status": "up"}],
+            "nodes": [{"name": "alpha", "health": [{"label": "SMART", "value": "1 failing", "tone": "bad", "detail": "sdb"}]}]}
+        Fake.routes = {"/api/status": (200, json.dumps(doc).encode(), {"Content-Type": "application/json"})}
+        httpd, base = serve(Fake)
+        try:
+            feed = SettFeed({"url": base, "exclude": ["flaresolverr"]})
+            got = {c.name: r for c, r in feed.poll()}
+        finally:
+            stop(httpd)
+        self.assertEqual(sorted(got), ["Sett", "Sonarr (media)", "alpha health"])
+        self.assertFalse(got["Sonarr (media)"].ok)
+        self.assertEqual(got["alpha health"].detail, "SMART: 1 failing (sdb)")
+
+    def test_restarting_sett_does_not_drop_services(self):
+        up = {"services": [{"key": "p@h", "name": "Paperless", "status": "down"}], "nodes": []}
+        restarting = {"services": [{"key": "p@h", "name": "Paperless", "status": "unknown"}], "nodes": []}
+        empty = {"services": [], "nodes": []}
+        feed = SettFeed({"url": "http://x"})
+        for doc in (up, restarting, empty):
+            feed.fetch = lambda d=doc: d
+            feed.poll()
+            self.assertIn("sett:p@h", {c.id for c in feed.checks()})
+
+    def test_unreachable_sett_is_one_failure(self):
+        feed = SettFeed({"url": f"http://127.0.0.1:{free_port()}"})
+        [(c, r)] = feed.poll()
+        self.assertEqual((c.name, r.ok), ("Sett", False))
+
+    def test_sett_401_says_what_to_do(self):
+        Fake.routes = {"/api/status": (401, b"{}", {})}
+        httpd, base = serve(Fake)
+        try:
+            [(c, r)] = SettFeed({"url": base}).poll()
+        finally:
+            stop(httpd)
+        self.assertIn("api_tokens", r.detail)
+
+
+class Notifiers(unittest.TestCase):
+    def setUp(self):
+        Fake.posts = []
+        self.httpd, self.base = serve(Fake)
+
+    def tearDown(self):
+        stop(self.httpd)
+
+    def test_ntfy_gotify_discord_webhook(self):
+        ev = {"kind": "down", "check": "Plex", "detail": "HTTP 502", "at": 0}
+        notify.ntfy({"url": f"{self.base}/alerts", "token": "tk"}, ev, "Lab")
+        notify.gotify({"url": self.base, "token": "gk"}, ev, "Lab")
+        notify.discord({"url": f"{self.base}/discord"}, ev, "Lab")
+        notify.webhook({"url": f"{self.base}/hook"}, ev, "Lab")
+        (p1, h1, b1), (p2, h2, b2), (p3, _, b3), (p4, _, b4) = Fake.posts
+        self.assertEqual((p1, h1["Priority"], h1["Authorization"]), ("/alerts", "5", "Bearer tk"))
+        self.assertTrue(h1["Title"].startswith("=?UTF-8?B?"))    # the emoji is not Latin-1
+        self.assertIn(b"HTTP 502", b1)
+        self.assertEqual((p2, h2["X-Gotify-Key"], json.loads(b2)["priority"]), ("/message", "gk", 5))
+        self.assertIn("Plex is down", json.loads(b3)["content"])
+        self.assertEqual(json.loads(b4)["check"], "Plex")
+
+    def test_messages(self):
+        self.assertEqual(notify.message({"kind": "up", "check": "X", "down_for": 3720}, "T")[1], "X is back after 1h 2m.")
+        self.assertEqual(fmt_duration(90061), "1 day 1h")
+
+
+class Page(unittest.TestCase):
+    def setUp(self):
+        a = Check("Public", "http", "http://10.0.0.5/", fail_after=1)
+        b = Check("Secret", "http", "http://10.0.0.6/", public=False)
+        self.m, _ = monitor(a, b, tokens={"me": "tok"})
+        self.m.record(a, Result(False, "connection refused at 10.0.0.5"))
+        self.httpd, self.base = serve(make_handler(self.m))
+
+    def tearDown(self):
+        stop(self.httpd)
+        self.m._restore()
+
+    def get(self, path, headers=None):
+        opener = urllib.request.build_opener(_NoRedirect)
+        try:
+            with opener.open(urllib.request.Request(self.base + path, headers=headers or {}), timeout=5) as r:
+                return r.status, dict(r.headers), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers), e.read()
+
+    def test_token_required_by_default(self):
+        self.assertEqual(self.get("/api/status")[0], 401)
+        self.assertEqual(self.get("/")[0], 401)
+        self.assertEqual(self.get("/healthz")[0], 200)
+        status, _, body = self.get("/api/status", {"Authorization": "Bearer tok"})
+        names = [c["name"] for c in json.loads(body)["checks"]]
+        self.assertEqual((status, sorted(names)), (200, ["Public", "Secret"]))
+
+    def test_token_link_becomes_cookie(self):
+        status, headers, _ = self.get("/?token=tok")
+        self.assertEqual(status, 302)
+        cookie = headers["Set-Cookie"].split(";")[0]
+        self.assertEqual(self.get("/", {"Cookie": cookie})[0], 200)
+
+    def test_public_page_hides_private_checks_and_details(self):
+        self.m.cfg.public_status = True
+        d = json.loads(self.get("/api/status")[2])
+        self.assertEqual([c["name"] for c in d["checks"]], ["Public"])
+        self.assertNotIn("detail", d["checks"][0])
+        self.assertNotIn("detail", d["incidents"][0])
+        self.assertNotIn("10.0.0.5", json.dumps(d))
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+if __name__ == "__main__":
+    unittest.main()

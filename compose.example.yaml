@@ -1,0 +1,15 @@
+services:
+  brock:
+    image: ghcr.io/kylechrisking/brock:latest
+    # build: .        # or build from a clone of the repo
+    container_name: brock
+    restart: unless-stopped
+    ports:
+      - "8098:8098"
+    # Lets the unprivileged user send pings (ICMP echo) without root.
+    sysctls:
+      - net.ipv4.ping_group_range=0 2147483647
+    volumes:
+      - ./config:/config:ro     # brock.toml
+      - ./secrets:/secrets:ro   # brock.toml with tokens and notifier passwords (optional)
+      - ./data:/data            # uptime history and incidents

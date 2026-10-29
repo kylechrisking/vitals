@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Status</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%2334d399'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #0b0f19; --surface: #121829; --surface-2: #1a2236; --border: #ffffff14; --text: #e7eaf3; --muted: #8690a8;
+  --ok: #34d399; --warn: #fbbf24; --bad: #fb7185; --none: #2a3349; --maint: #818cf8;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root { --bg: #f4f6fb; --surface: #ffffff; --surface-2: #eef1f7; --border: #0f172a14; --text: #111827; --muted: #5b6478;
+          --ok: #059669; --warn: #d97706; --bad: #e11d48; --none: #dde2ec; --maint: #6366f1; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 var(--font); }
+.page { max-width: 880px; margin: 0 auto; padding: 32px 16px 48px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+h1 { margin: 0; font-size: 24px; letter-spacing: -0.01em; }
+.muted { color: var(--muted); font-size: 13px; }
+.banner { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-radius: 14px; background: var(--surface);
+          border: 1px solid var(--border); font-weight: 600; margin-bottom: 24px; }
+.banner.down { border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.up { background: var(--ok); } .dot.down { background: var(--bad); } .dot.maintenance { background: var(--maint); }
+.group { margin-bottom: 22px; }
+.group h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px 2px; }
+.rows { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.row { padding: 12px 16px; display: grid; gap: 8px; border-top: 1px solid var(--border); }
+.row:first-child { border-top: 0; }
+.row-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.row-head b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-head .right { margin-left: auto; display: flex; gap: 12px; align-items: center; font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.detail { font-size: 12.5px; color: var(--muted); font-family: var(--mono); overflow-wrap: anywhere; }
+.row.down .detail { color: var(--bad); }
+.bars { display: grid; grid-template-columns: repeat(30, 1fr); gap: 2px; height: 22px; }
+.bars i { border-radius: 2px; background: var(--none); }
+.bars i.ok { background: var(--ok); } .bars i.warn { background: var(--warn); } .bars i.bad { background: var(--bad); }
+.legend { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+.incidents { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 4px 16px; }
+.incident { display: flex; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); font-size: 14px; flex-wrap: wrap; }
+.incident:first-child { border-top: 0; }
+.incident .when { color: var(--muted); font-family: var(--mono); font-size: 12.5px; min-width: 140px; }
+.incident .open { color: var(--bad); font-weight: 600; }
+.empty { color: var(--muted); padding: 12px 0; font-size: 14px; }
+.errors { border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); color: var(--warn); border-radius: 12px; padding: 10px 14px; margin-bottom: 18px; font-size: 13px; }
+footer { margin-top: 28px; text-align: center; }
+@media (max-width: 520px) { .incident { flex-direction: column; gap: 2px; } .incident .when { min-width: 0; } }
+@media (max-width: 520px) { .row-head .right .lat { display: none; } .bars { grid-template-columns: repeat(14, 1fr); } .bars i:nth-child(-n+16) { display: none; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header><h1 id="title">Status</h1><span id="updated" class="muted"></span></header>
+  <div id="errors" class="errors" hidden></div>
+  <div id="banner" class="banner"><span class="dot"></span><span>Loading…</span></div>
+  <div id="groups"></div>
+  <h2 class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin:28px 0 8px 2px">Recent incidents</h2>
+  <div id="incidents" class="incidents"></div>
+  <footer class="muted">Brock</footer>
+</div>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pct = (v) => (v == null ? "–" : `${v >= 99.995 ? "100" : v.toFixed(v >= 99.9 ? 2 : 1)}%`);
+function dur(s) {
+  s = Math.max(0, Math.round(s));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  return `${Math.floor(s / 86400)}d ${Math.floor((s % 86400) / 3600)}h`;
+}
+const when = (t) => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const barTone = (v) => (v == null ? "" : v >= 99.5 ? "ok" : v >= 95 ? "warn" : "bad");
+
+function row(c, now) {
+  const label = c.status === "maintenance" ? "maintenance" : c.status === "pending" ? "checking…"
+    : c.status === "down" ? `down ${dur(now - c.since)}` : "up";
+  const bars = (c.bars || []).map((v, i) => `<i class="${barTone(v)}" title="${v == null ? "no data" : pct(v)} · ${i === c.bars.length - 1 ? "today" : `${c.bars.length - 1 - i}d ago`}"></i>`).join("");
+  return `<div class="row ${esc(c.status)}">
+    <div class="row-head"><span class="dot ${esc(c.status)}"></span><b title="${esc(c.target || c.name)}">${esc(c.name)}</b>
+      <span class="right"><span class="lat">${c.latency_ms != null && c.status === "up" ? `${c.latency_ms} ms` : ""}</span>
+      <span title="7 days ${pct(c.uptime["7d"])} · 30 days ${pct(c.uptime["30d"])} · 90 days ${pct(c.uptime["90d"])}">${pct(c.uptime["30d"])}</span>
+      <span>${esc(label)}</span></span></div>
+    ${c.status === "down" && c.detail ? `<div class="detail">${esc(c.detail)}</div>` : ""}
+    <div class="bars" aria-label="Daily uptime, last 30 days">${bars}</div>
+  </div>`;
+}
+
+function render(d) {
+  const now = d.generated_at;
+  document.title = d.title;
+  $("#title").textContent = d.title;
+  $("#updated").textContent = `Updated ${new Date(now * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${d.quiet ? " · quiet hours" : ""}`;
+  $("#errors").hidden = !(d.errors || []).length;
+  $("#errors").textContent = (d.errors || []).join(" · ");
+  const down = d.checks.filter((c) => c.status === "down");
+  $("#banner").className = `banner ${down.length ? "down" : ""}`;
+  $("#banner").innerHTML = `<span class="dot ${down.length ? "down" : d.checks.length ? "up" : ""}"></span><span>${
+    !d.checks.length ? "Nothing is being watched yet." : down.length ? `${down.length} of ${d.checks.length} ${down.length === 1 ? "is" : "are"} down: ${esc(down.map((c) => c.name).join(", "))}` : "Everything is up"}</span>`;
+  const groups = new Map();
+  for (const c of [...d.checks].sort((a, b) => (b.status === "down") - (a.status === "down") || a.name.localeCompare(b.name))) {
+    const g = c.group || "Checks";
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(c);
+  }
+  $("#groups").innerHTML = [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([g, cs]) =>
+    `<section class="group"><h2>${esc(g)}</h2><div class="rows">${cs.map((c) => row(c, now)).join("")}</div></section>`).join("");
+  $("#incidents").innerHTML = d.incidents.length ? d.incidents.slice(0, 20).map((i) =>
+    `<div class="incident"><span class="when">${when(i.start)}</span><span><b>${esc(i.check)}</b> ${
+      i.end ? `was down for ${dur(i.end - i.start)}` : `<span class="open">is down</span> (${dur(now - i.start)})`}${
+      i.maintenance ? " · during maintenance" : ""}${i.detail ? ` · <span class="muted">${esc(i.detail)}</span>` : ""}</span></div>`).join("")
+    : `<div class="empty">No incidents recorded.</div>`;
+}
+
+async function load() {
+  try {
+    const r = await fetch("api/status", { cache: "no-store" });
+    if (r.ok) render(await r.json());
+    else $("#banner").innerHTML = `<span class="dot down"></span><span>This page needs a token: open it as ?token=…</span>`;
+  } catch {
+    $("#updated").textContent = "Can't reach Brock — retrying";
+  }
+  setTimeout(load, 15000);
+}
+load();
+</script>
+</body>
+</html>
