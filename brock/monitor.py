@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import checks, notify
+from . import agents, checks, notify
 from .config import Check, Config, data_dir
 from .sett import SettFeed
 
@@ -57,6 +57,7 @@ class Monitor:
         self.states: dict[str, State] = {}
         self.incidents: list[dict] = []
         self.held: list[dict] = []       # alerts held back by quiet hours
+        self.hosts: dict[str, dict] = {}  # agent name -> {"last": time, "report": doc, "summary": str}
         self.lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=32, thread_name_prefix="check")
         self.running: set[str] = set()
@@ -72,7 +73,52 @@ class Monitor:
         out = list(self.cfg.checks)
         if self.sett:
             out += self.sett.checks()
+        for name, h in list(self.hosts.items()):
+            out += [c for c, _ in agents.evaluate(name, h["report"], agents.host_conf(self.cfg.agents, name))]
         return out
+
+    # ---- host agents -------------------------------------------------------------------
+
+    def agent_report(self, doc: dict, now: float | None = None) -> str | None:
+        """Take one agent report: remember the host and record each of its checks."""
+        now = now or time.time()
+        name = agents.clean_name(doc.get("name"))
+        if not name:
+            return None
+        conf = agents.host_conf(self.cfg.agents, name)
+        with self.lock:
+            new = name not in self.hosts
+            self.hosts[name] = {"last": now, "report": doc, "summary": agents.summary(doc)}
+        if new:
+            log.info("agent: %s reporting (%s, agent %s)", name, doc.get("os"), doc.get("agent"))
+        for c, r in agents.evaluate(name, doc, conf):
+            self.states.setdefault(c.id, State(since=now)).last_run = now
+            self.record(c, r, now)
+        return name
+
+    def _agent_heartbeats(self, now: float) -> None:
+        for name, h in list(self.hosts.items()):
+            conf = agents.host_conf(self.cfg.agents, name)
+            if now - h["last"] > agents.FORGET_AFTER:
+                self._forget_host(name)
+                continue
+            late = agents.missed(h["last"], conf, now)
+            if late is None:
+                continue
+            c = agents.heartbeat(name, conf)
+            st = self.states.setdefault(c.id, State(since=now))
+            if now - st.last_run >= float(conf["every"]):
+                st.last_run = now
+                self.record(c, checks.Result(False, f"no report for {fmt_duration(late)}"), now)
+
+    def _forget_host(self, name: str) -> None:
+        with self.lock:
+            self.hosts.pop(name, None)
+            for cid in [k for k in self.states if k.startswith(f"agent:{name}/")]:
+                st = self.states.pop(cid)
+                if st.incident is not None:
+                    self.incidents[st.incident].update(end=time.time(), note="host forgotten")
+        log.info("agent: forgot %s (silent for 30 days)", name)
 
     def by_id(self) -> dict[str, Check]:
         return {c.id: c for c in self.all_checks()}
@@ -105,6 +151,7 @@ class Monitor:
                 self.running.add(c.id)
                 st.last_run = now
             self.pool.submit(self._run, c)
+        self._agent_heartbeats(now)
         self._remind(now)
         self._flush_held(now)
 
@@ -214,7 +261,7 @@ class Monitor:
 
     def _event(self, kind: str, c: Check, st: State, now: float) -> dict:
         ev = {"kind": kind, "check": c.name, "group": c.group, "type": c.type, "target": c.target,
-              "detail": st.detail, "at": now}
+              "detail": st.detail, "at": now, "about": about(c)}
         if kind in ("up", "reminder"):
             ev["down_for"] = now - (self.incidents[st.incident]["start"] if st.incident is not None else st.since)
         return ev
@@ -312,6 +359,8 @@ class Monitor:
                    "bars": self.bars(st, now)}
             if full:
                 row.update(target=c.target, detail=st.detail, every=c.every)
+                if c.source == "agent" and c.key.endswith("/host") and c.target in self.hosts:
+                    row["summary"] = self.hosts[c.target]["summary"]
             rows.append(row)
         incidents = [i for i in reversed(self.incidents) if full or i.get("public", True)][:50]
         if not full:
@@ -343,7 +392,7 @@ class Monitor:
         if not self.state_file:
             return
         with self.lock:
-            doc = {"v": 1, "saved": time.time(), "incidents": self.incidents,
+            doc = {"v": 1, "saved": time.time(), "incidents": self.incidents, "hosts": self.hosts,
                    "states": {k: s.to_json() for k, s in self.states.items()}}
         tmp = f"{self.state_file}.tmp"
         try:
@@ -359,6 +408,8 @@ class Monitor:
         try:
             doc = json.loads(self.state_file.read_text(encoding="utf-8"))
             self.incidents = list(doc.get("incidents", []))[-KEEP_INCIDENTS:]
+            self.hosts = {k: v for k, v in (doc.get("hosts") or {}).items()
+                          if isinstance(v, dict) and "last" in v and isinstance(v.get("report"), dict)}
             open_by_id = {i["id"]: n for n, i in enumerate(self.incidents) if i.get("end") is None and "id" in i}
             for cid, d in doc.get("states", {}).items():
                 st = State(status=d.get("status", "pending"), since=float(d.get("since", 0)),
@@ -373,6 +424,16 @@ class Monitor:
             log.info("state: %d checks, %d incidents restored", len(self.states), len(self.incidents))
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as e:
             log.warning("could not read %s: %s", self.state_file, e)
+
+
+def about(c: Check) -> str:
+    """How to word an alert: "service" (is down / back up), "host" (stopped
+    reporting), or "problem" (a disk, a certificate, a failing drive: something wrong, not something gone)."""
+    if c.source == "agent":
+        return "host" if c.key.endswith("/host") else "problem"
+    if c.type == "tls" or c.key.startswith("node:"):
+        return "problem"
+    return "service"
 
 
 def _when(v) -> float:

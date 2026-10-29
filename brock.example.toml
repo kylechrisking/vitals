@@ -61,6 +61,27 @@ type = "dns"
 target = "nas.home.lan"
 expect = "192.168.1.20"     # optional: must resolve to this
 
+# ---- host agents ------------------------------------------------------------------
+
+# Machines running the agent report disks, memory, temperatures, failed services,
+# pending updates and Defender. Install with one line per machine (see README).
+# [agents]
+# token = "..."              # letters, digits and - _ . ~ + / = ; better in the secrets file
+# every = 60                 # seconds between reports
+# missed = 3                 # missed reports before "stopped reporting"
+# disk_above = 90            # % used on any disk
+# temp_above = 85            # °C
+# memory_above = 0           # % used (0 = don't alert)
+# updates_above = 0          # alert when more updates than this are waiting (0 = don't)
+# services = true            # failed systemd units / crashed Windows services
+# defender = true            # Windows Defender real-time protection off
+# ignore_mounts = ["/boot/efi"]
+# ignore_services = []
+# public = false             # hosts aren't on a public status page unless you say so
+#
+# [agents.hosts.nas]         # per-host overrides
+# disk_above = 95
+
 # ---- where alerts go ---------------------------------------------------------------
 
 [[notify]]

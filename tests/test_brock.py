@@ -397,6 +397,114 @@ class Page(unittest.TestCase):
         self.assertNotIn("10.0.0.5", json.dumps(d))
 
 
+LINUX = {"name": "pve1", "os": "linux", "uptime": 90000, "memory": {"used_pct": 40.0},
+         "disks": [{"mount": "/", "used_pct": 50.0, "free": 50 * 2**30}, {"mount": "/mnt/tank", "used_pct": 93.0, "free": 2**30}],
+         "temps": [{"sensor": "coretemp", "celsius": 61.0}], "failed_services": ["smartd.service"], "updates": 3,
+         "reboot_required": True}
+WINDOWS = {"name": "KKINGD01", "os": "windows", "memory": {"used_pct": 55.0},
+           "disks": [{"mount": "C:", "used_pct": 70.0, "free": 100 * 2**30}], "temps": [], "failed_services": [],
+           "updates": 12, "reboot_required": False, "defender": {"realtime": False, "antivirus": True, "signature_age_days": 1}}
+
+
+class Agents(unittest.TestCase):
+    def test_evaluate_linux(self):
+        from brock import agents
+        got = {c.name: r for c, r in agents.evaluate("pve1", LINUX, agents.host_conf({}, "pve1"))}
+        self.assertTrue(got["pve1"].ok)
+        self.assertFalse(got["pve1 · disk"].ok)
+        self.assertEqual(got["pve1 · disk"].detail, "/mnt/tank 93% (1.0 GB free)")
+        self.assertTrue(got["pve1 · temperature"].ok)
+        self.assertEqual(got["pve1 · services"].detail, "failed: smartd.service")
+        self.assertNotIn("pve1 · updates", got)     # off unless updates_above is set
+        self.assertEqual(agents.summary(LINUX), "/mnt/tank 93% · RAM 40% · 61°C · 3 updates · reboot pending · up 1d 1h")
+
+    def test_overrides_and_ignores(self):
+        from brock import agents
+        conf = agents.host_conf({"disk_above": 80, "ignore_services": ["smartd.service"],
+                                 "hosts": {"pve1": {"disk_above": 95}}}, "pve1")
+        got = {c.name: r for c, r in agents.evaluate("pve1", LINUX, conf)}
+        self.assertTrue(got["pve1 · disk"].ok)
+        self.assertTrue(got["pve1 · services"].ok)
+
+    def test_windows_defender_and_updates(self):
+        from brock import agents
+        got = {c.name: r for c, r in agents.evaluate("KKINGD01", WINDOWS, agents.host_conf({"updates_above": 10}, "KKINGD01"))}
+        self.assertFalse(got["KKINGD01 · defender"].ok)
+        self.assertFalse(got["KKINGD01 · updates"].ok)
+        self.assertNotIn("KKINGD01 · temperature", got)
+
+    def test_names_are_checked(self):
+        from brock import agents
+        self.assertEqual(agents.clean_name(" pve-1.lan "), "pve-1.lan")
+        self.assertIsNone(agents.clean_name("x; rm -rf /"))
+        self.assertIsNone(agents.clean_name(""))
+
+    def test_heartbeat_goes_down_and_wording(self):
+        self.m, sent = monitor(agents={"every": 60, "missed": 3})
+        try:
+            self.m.agent_report(dict(LINUX, failed_services=[], disks=[]), now=1000.0)
+            self.m._agent_heartbeats(1000.0 + 120)
+            self.assertEqual(sent, [])
+            self.m._agent_heartbeats(1000.0 + 200)
+            self.assertEqual([e["about"] for e in sent], ["host"])
+            self.assertEqual(notify.message(sent[0], "T")[0], "🔴 pve1 stopped reporting")
+            self.m.agent_report(dict(LINUX, failed_services=[], disks=[]), now=1000.0 + 260)
+            self.assertEqual(notify.message(sent[-1], "T")[0], "🟢 pve1 is reporting again")
+        finally:
+            self.m._restore()
+
+    def test_problem_wording(self):
+        ev = {"kind": "down", "check": "pve1 · disk", "detail": "/mnt/tank 93%", "about": "problem"}
+        self.assertEqual(notify.message(ev, "T")[0], "🔴 pve1 · disk: /mnt/tank 93%")
+
+    def test_silent_host_is_forgotten(self):
+        from brock import agents
+        self.m, _ = monitor()
+        try:
+            self.m.agent_report(LINUX, now=1000.0)
+            self.m._agent_heartbeats(1000.0 + agents.FORGET_AFTER + 1)
+            self.assertEqual(self.m.hosts, {})
+            self.assertFalse(any(k.startswith("agent:") for k in self.m.states))
+        finally:
+            self.m._restore()
+
+
+class AgentHttp(unittest.TestCase):
+    def setUp(self):
+        self.m, self.sent = monitor(agents={"token": "agent-tok"}, tokens={"me": "page"})
+        self.httpd, self.base = serve(make_handler(self.m))
+
+    def tearDown(self):
+        stop(self.httpd)
+        self.m._restore()
+
+    def post(self, doc, token):
+        r = urllib.request.Request(self.base + "/api/report", data=json.dumps(doc).encode(), method="POST",
+                                   headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"})
+        try:
+            with urllib.request.urlopen(r, timeout=5) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return e.code, None
+
+    def test_report_needs_the_agent_token(self):
+        self.assertEqual(self.post(WINDOWS, "page")[0], 401)
+        self.assertEqual(self.post(WINDOWS, "agent-tok"), (200, {"ok": True, "name": "KKINGD01"}))
+        self.assertIn("KKINGD01", self.m.hosts)
+        self.assertEqual(self.post({"name": "bad name!"}, "agent-tok")[0], 400)
+
+    def test_installers_are_filled_in(self):
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen(self.base + "/install.ps1?token=wrong", timeout=5)
+        with urllib.request.urlopen(self.base + "/install.ps1?token=agent-tok", timeout=5) as r:
+            body = r.read().decode()
+        self.assertIn(f"$Server = '{self.base}'", body)
+        self.assertIn("$Token = 'agent-tok'", body)
+        self.assertNotIn("__", body.split("$Server")[1][:40])
+        with urllib.request.urlopen(self.base + "/agent.py?token=agent-tok", timeout=5) as r:
+            self.assertIn(b"def report", r.read())
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **k):
         return None

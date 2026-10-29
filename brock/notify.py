@@ -32,6 +32,18 @@ def message(ev: dict, title: str) -> tuple[str, str]:
     """(subject, body) in plain words."""
     from .monitor import fmt_duration
     k = ev["kind"]
+    about = ev.get("about", "service")
+    if about == "problem" and k in ("down", "up", "reminder"):
+        if k == "down":
+            return f"🔴 {ev['check']}: {ev.get('detail') or 'problem'}", f"{ev['check']}: {ev.get('detail') or 'problem'}."
+        if k == "up":
+            return f"🟢 {ev['check']} is OK again", f"{ev['check']} is OK again after {fmt_duration(ev.get('down_for', 0))}."
+        return (f"🔴 {ev['check']}: still {ev.get('detail') or 'a problem'}",
+                f"{ev['check']} has had this problem for {fmt_duration(ev.get('down_for', 0))}: {ev.get('detail')}.")
+    if about == "host" and k == "down":
+        return f"🔴 {ev['check']} stopped reporting", f"{ev['check']} hasn't reported in: {ev.get('detail') or 'no report'}."
+    if about == "host" and k == "up":
+        return f"🟢 {ev['check']} is reporting again", f"{ev['check']} is back after {fmt_duration(ev.get('down_for', 0))}."
     if k == "down":
         return f"🔴 {ev['check']} is down", f"{ev['check']} stopped answering: {ev.get('detail') or 'no reply'}."
     if k == "up":

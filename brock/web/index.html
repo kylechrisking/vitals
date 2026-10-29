@@ -87,7 +87,8 @@ function row(c, now) {
       <span class="right"><span class="lat">${c.latency_ms != null && c.status === "up" ? `${c.latency_ms} ms` : ""}</span>
       <span title="7 days ${pct(c.uptime["7d"])} · 30 days ${pct(c.uptime["30d"])} · 90 days ${pct(c.uptime["90d"])}">${pct(c.uptime["30d"])}</span>
       <span>${esc(label)}</span></span></div>
-    ${c.status === "down" && c.detail ? `<div class="detail">${esc(c.detail)}</div>` : ""}
+    ${c.status === "down" && c.detail ? `<div class="detail">${esc(c.detail)}</div>`
+      : c.summary ? `<div class="detail summary">${esc(c.summary)}</div>` : ""}
     <div class="bars" aria-label="Daily uptime, last 30 days">${bars}</div>
   </div>`;
 }

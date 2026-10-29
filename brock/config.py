@@ -65,6 +65,7 @@ class Config:
     remind_every: float = 0                              # minutes between "still down" reminders (0 = never)
     public_status: bool = False                          # serve the status page without a token
     tokens: dict = field(default_factory=dict)           # name -> token for /api/* and the page
+    agents: dict = field(default_factory=dict)           # [agents] host agents: token, thresholds, per-host overrides
     files: dict[str, float] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)      # problems found while loading, shown on the page
 
@@ -83,6 +84,7 @@ def load() -> Config:
         remind_every=float(raw.get("remind_every", 0)),
         public_status=bool(raw.get("public_status", False)),
         tokens={**raw.get("tokens", {}), **secrets.get("tokens", {})},
+        agents={**raw.get("agents", {}), **secrets.get("agents", {})},
         files={str(path): _mtime(path), str(secrets_path): _mtime(secrets_path)},
     )
     if os.environ.get("BROCK_SETT_URL"):

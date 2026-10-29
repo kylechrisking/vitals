@@ -10,6 +10,7 @@ from __future__ import annotations
 import hmac
 import json
 import logging
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -18,6 +19,12 @@ from .monitor import Monitor
 
 log = logging.getLogger(__name__)
 WEB = Path(__file__).parent / "web"
+HERE = Path(__file__).parent
+# Agent files, served to machines that present the agent token.
+AGENT_FILES = {"/agent.py": (HERE / "agent.py", "text/x-python"), "/agent.ps1": (HERE / "agent.ps1", "text/plain"),
+               "/install.sh": (HERE / "install" / "install.sh", "text/x-shellscript"),
+               "/install.ps1": (HERE / "install" / "install.ps1", "text/plain")}
+MAX_REPORT = 256 * 1024
 COOKIE = "brock_token"
 
 
@@ -55,6 +62,38 @@ def make_handler(mon: Monitor):
                     return True
             return False
 
+        def _agent_token_ok(self, token: str | None) -> bool:
+            want = mon.cfg.agents.get("token")
+            return bool(token) and isinstance(want, str) and bool(want) and hmac.compare_digest(want.encode(), token.encode())
+
+        def _server_url(self) -> str:
+            """The address agents should use: [agents] server_url, else the one this request came in on."""
+            if mon.cfg.agents.get("server_url"):
+                return str(mon.cfg.agents["server_url"]).rstrip("/")
+            proto = "https" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else "http"
+            host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "").split(",")[0].strip()
+            if not re.fullmatch(r"[A-Za-z0-9.\-]+(:\d{1,5})?|\[[0-9A-Fa-f:.]+\](:\d{1,5})?", host):
+                host = f"localhost:{mon.cfg.port}"   # it goes into a script: nothing odd gets through
+            return f"{proto}://{host}"
+
+        def do_POST(self):
+            if urlparse(self.path).path != "/api/report":
+                return self._send(404, b"not found", "text/plain")
+            auth = self.headers.get("Authorization", "")
+            if not self._agent_token_ok(auth[7:].strip() if auth.startswith("Bearer ") else None):
+                return self._send(401, b'{"error":"agent token required"}', "application/json")
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > MAX_REPORT:
+                return self._send(413, b'{"error":"report too large"}', "application/json")
+            try:
+                doc = json.loads(self.rfile.read(n).decode("utf-8-sig"))
+            except ValueError:
+                return self._send(400, b'{"error":"not JSON"}', "application/json")
+            name = mon.agent_report(doc) if isinstance(doc, dict) else None
+            if not name:
+                return self._send(400, b'{"error":"report needs a name (letters, digits, - _ .)"}', "application/json")
+            self._send(200, json.dumps({"ok": True, "name": name}).encode(), "application/json")
+
         def do_HEAD(self):
             self.do_GET()
 
@@ -63,6 +102,14 @@ def make_handler(mon: Monitor):
             if u.path == "/healthz":
                 return self._send(200, b"ok", "text/plain")
             token = parse_qs(u.query).get("token", [None])[0]
+            if u.path in AGENT_FILES:
+                if not self._agent_token_ok(token) or not re.fullmatch(r"[A-Za-z0-9._~+/=-]+", token):
+                    return self._send(401, b"agent token required: ?token=<[agents] token>\n", "text/plain")
+                f, ctype = AGENT_FILES[u.path]
+                body = f.read_text(encoding="utf-8")
+                if u.path.startswith("/install"):
+                    body = body.replace("__SERVER__", self._server_url()).replace("__TOKEN__", token)
+                return self._send(200, body.encode("utf-8"), f"{ctype}; charset=utf-8")
             if token and self._token_ok(token):
                 # Swap the token in the address bar for a cookie, so it doesn't sit in history.
                 return self._send(302, b"", "text/plain", {
