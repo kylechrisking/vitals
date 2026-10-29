@@ -244,7 +244,7 @@ class Monitor:
                     st.status, st.since = "down", now
                     self.incidents.append({"check": c.name, "id": c.id, "group": c.group, "start": now,
                                            "end": None, "detail": r.detail, "public": c.public,
-                                           "maintenance": maint})
+                                           "maintenance": maint, "about": about(c)})
                     if len(self.incidents) > KEEP_INCIDENTS:
                         drop = len(self.incidents) - KEEP_INCIDENTS
                         self.incidents = self.incidents[drop:]

@@ -447,6 +447,7 @@ class Agents(unittest.TestCase):
             self.assertEqual(sent, [])
             self.m._agent_heartbeats(1000.0 + 200)
             self.assertEqual([e["about"] for e in sent], ["host"])
+            self.assertEqual(self.m.incidents[-1]["about"], "host")
             self.assertEqual(notify.message(sent[0], "T")[0], "🔴 pve1 stopped reporting")
             self.m.agent_report(dict(LINUX, failed_services=[], disks=[]), now=1000.0 + 260)
             self.assertEqual(notify.message(sent[-1], "T")[0], "🟢 pve1 is reporting again")

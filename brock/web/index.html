@@ -93,6 +93,13 @@ function row(c, now) {
   </div>`;
 }
 
+// "was down" fits a service; a host stops reporting; a disk or a certificate has a problem.
+function incidentText(i, now) {
+  const [past, open] = i.about === "host" ? ["stopped reporting for", "isn't reporting"]
+    : i.about === "problem" ? ["had a problem for", "has a problem"] : ["was down for", "is down"];
+  return i.end ? `${past} ${dur(i.end - i.start)}` : `<span class="open">${open}</span> (${dur(now - i.start)})`;
+}
+
 function render(d) {
   const now = d.generated_at;
   document.title = d.title;
@@ -114,7 +121,7 @@ function render(d) {
     `<section class="group"><h2>${esc(g)}</h2><div class="rows">${cs.map((c) => row(c, now)).join("")}</div></section>`).join("");
   $("#incidents").innerHTML = d.incidents.length ? d.incidents.slice(0, 20).map((i) =>
     `<div class="incident"><span class="when">${when(i.start)}</span><span><b>${esc(i.check)}</b> ${
-      i.end ? `was down for ${dur(i.end - i.start)}` : `<span class="open">is down</span> (${dur(now - i.start)})`}${
+      incidentText(i, now)}${
       i.maintenance ? " · during maintenance" : ""}${i.detail ? ` · <span class="muted">${esc(i.detail)}</span>` : ""}</span></div>`).join("")
     : `<div class="empty">No incidents recorded.</div>`;
 }
