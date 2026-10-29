@@ -644,6 +644,23 @@ class SettingsApi(unittest.TestCase):
         self.assertEqual((status, items[0]["check"]), (200, "Plex"))
 
 
+class FirstRun(unittest.TestCase):
+    def test_tokens_made_once_and_kept(self):
+        from brock import settings as S
+        f = Path(TMP) / "tokens.json"
+        if f.exists():
+            f.unlink()
+        a, b = Config(), Config()
+        made = S.ensure_tokens(a)
+        self.assertEqual(set(made), {"page", "agent"})
+        self.assertEqual(f.stat().st_mode & 0o777, 0o600)
+        S.ensure_tokens(b)
+        self.assertEqual((a.tokens, a.agents["token"]), (b.tokens, b.agents["token"]))   # same after a restart
+        c = Config(tokens={"me": "mine"}, agents={"token": "theirs"})
+        self.assertEqual(S.ensure_tokens(c), {})                                         # config wins
+        self.assertEqual((c.tokens, c.agents["token"]), ({"me": "mine"}, "theirs"))
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **k):
         return None

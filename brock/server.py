@@ -220,6 +220,7 @@ def settings_view(mon: Monitor) -> dict:
         "agents": {k: v for k, v in agents.host_conf(cfg.agents, "").items() if k in settings.AGENT_KEYS},
         "agent_hosts": cfg.agents.get("hosts") or {},
         "agents_token": bool(cfg.agents.get("token")),
+        "agent_token": cfg.agents.get("token") or "",   # the page is token-protected; it shows the install lines
         "sites": [{**s, "status": (by_id.get(f"site:{s['name']}") or {}).get("status", "pending"),
                    "detail": (by_id.get(f"site:{s['name']}") or {}).get("detail", ""),
                    "from_page": s["name"] in {x["name"] for x in doc.get("sites") or []}} for s in cfg.sites],
@@ -228,9 +229,27 @@ def settings_view(mon: Monitor) -> dict:
     }
 
 
+def lan_ip() -> str:
+    """This machine's LAN address (a UDP connect sends nothing), for the first-run hint.
+    Inside a container that would be the container's own address, so say so instead."""
+    import os
+    import socket
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+        return "<your-docker-host>"
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 9))
+            return s.getsockname()[0]
+    except OSError:
+        return "<this-machine>"
+
+
 def serve(mon: Monitor, port: int) -> None:
     httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(mon))
     httpd.daemon_threads = True
     mon.start()   # only once the page is listening, so a check of Brock itself passes from the start
     log.info("status page on :%d%s", port, " (public)" if mon.cfg.public_status else "")
+    if mon.cfg.made_tokens.get("page"):
+        log.info("first time? open http://%s:%d/settings?token=%s (the token is kept in the data folder)",
+                 lan_ip(), port, mon.cfg.made_tokens["page"])
     httpd.serve_forever()

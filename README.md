@@ -120,8 +120,10 @@ curl -fsSL -o config/brock.toml --create-dirs https://raw.githubusercontent.com/
 docker compose -f compose.example.yaml up -d
 ```
 
-Open `http://<that-machine>:8098/?token=<your token>` once; a cookie keeps
-you signed in after that.
+No tokens in your config? Brock makes its own on first start. Find the link
+with `docker logs brock | grep "first time"`, open it, and a cookie keeps
+you signed in after that. The settings page's Hosts tab then has the one-line
+agent installs, with your address and agent token already filled in.
 
 Run it somewhere other than the things it watches if you can, so it can
 still tell you when that machine goes down. A Raspberry Pi works well.

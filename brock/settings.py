@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 from pathlib import Path
 
 from .config import CHECK_TYPES, NOTIFY_TYPES, Check, Config, data_dir
@@ -62,6 +63,39 @@ def save_doc(doc: dict) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(doc, f, indent=1)
     os.replace(tmp, p)
+
+
+# ---- first run: tokens nobody had to make up ------------------------------------------
+
+def ensure_tokens(cfg: Config) -> dict:
+    """Without [tokens] or an [agents] token in the config, Brock makes its own on
+    first start and keeps them in <data>/tokens.json (mode 600), so the page and
+    the agents work without editing a file. Returns the ones it made up."""
+    d = data_dir()
+    if not d:
+        return {}
+    f = d / "tokens.json"
+    try:
+        made = json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+    except (OSError, ValueError):
+        made = {}
+    changed = False
+    for key in ("page", "agent"):
+        if not made.get(key):
+            made[key] = secrets.token_urlsafe(24)
+            changed = True
+    if changed:
+        fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(made, fh)
+    used = {}
+    if not cfg.tokens:
+        cfg.tokens = {"page": made["page"]}
+        used["page"] = made["page"]
+    if not cfg.agents.get("token"):
+        cfg.agents["token"] = made["agent"]
+        used["agent"] = made["agent"]
+    return used
 
 
 # ---- applying: brock.toml + settings.json -> the config Brock runs on -------------------

@@ -68,6 +68,7 @@ class Config:
     tokens: dict = field(default_factory=dict)           # name -> token for /api/* and the page
     agents: dict = field(default_factory=dict)           # [agents] host agents: token, thresholds, per-host overrides
     muted: set = field(default_factory=set)              # check ids that never notify
+    made_tokens: dict = field(default_factory=dict)      # tokens Brock made itself (no [tokens] / [agents] token)
     sites: list[dict] = field(default_factory=list)      # [[site]] name, address, members (check ids or names), count
     files: dict[str, float] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)      # problems found while loading, shown on the page
@@ -132,6 +133,7 @@ def load() -> Config:
     if sp:
         cfg.files[str(sp)] = _mtime(sp)
     settings.apply(cfg, settings.load_doc())
+    cfg.made_tokens = settings.ensure_tokens(cfg)
     for e in cfg.errors:
         log.warning("config: %s", e)
     return cfg
