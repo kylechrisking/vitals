@@ -118,7 +118,9 @@ function render(d) {
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(c);
   }
-  $("#groups").innerHTML = [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([g, cs]) =>
+  const first = ["Sites", "Hosts"];   // what's up as a whole first, then the machines, then everything else
+  const rank = (g) => (first.includes(g) ? first.indexOf(g) : first.length);
+  $("#groups").innerHTML = [...groups].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b)).map(([g, cs]) =>
     `<section class="group"><h2>${esc(g)}</h2><div class="rows">${cs.map((c) => row(c, now)).join("")}</div></section>`).join("");
   $("#incidents").innerHTML = d.incidents.length ? d.incidents.slice(0, 20).map((i) =>
     `<div class="incident"><span class="when">${when(i.start)}</span><span><b>${esc(i.check)}</b> ${
