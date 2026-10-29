@@ -55,7 +55,7 @@ footer { margin-top: 28px; text-align: center; }
 </head>
 <body>
 <div class="page">
-  <header><h1 id="title">Status</h1><span id="updated" class="muted"></span></header>
+  <header><h1 id="title">Status</h1><span id="updated" class="muted"></span><a id="settings-link" href="settings" class="muted" hidden>Settings</a></header>
   <div id="errors" class="errors" hidden></div>
   <div id="banner" class="banner"><span class="dot"></span><span>Loading…</span></div>
   <div id="groups"></div>
@@ -103,6 +103,7 @@ function incidentText(i, now) {
 function render(d) {
   const now = d.generated_at;
   document.title = d.title;
+  $("#settings-link").hidden = !d.full;
   $("#title").textContent = d.title;
   $("#updated").textContent = `Updated ${new Date(now * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${d.quiet ? " · quiet hours" : ""}`;
   $("#errors").hidden = !(d.errors || []).length;

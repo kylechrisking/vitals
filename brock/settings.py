@@ -129,6 +129,8 @@ def clean(new: dict, old: dict) -> dict:
         if n.get("type") not in NOTIFY_TYPES:
             raise Invalid(f"{name}: pick a type ({', '.join(NOTIFY_TYPES)})")
         d = {k: v for k, v in n.items() if k in NOTIFIER_KEYS | ROUTE_KEYS}
+        if isinstance(d.get("to"), str):
+            d["to"] = [x.strip() for x in d["to"].split(",") if x.strip()]
         for k in SECRET_KEYS:
             if isinstance(d.get(k), str) and MASK in d[k]:
                 d[k] = (old_n.get(name) or old_n.get(n.get("was")) or {}).get(k, "")

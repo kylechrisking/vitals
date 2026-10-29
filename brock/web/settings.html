@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Settings</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='%2334d399'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #0b0f19; --surface: #121829; --surface-2: #1a2236; --border: #ffffff14; --border-2: #ffffff24; --text: #e7eaf3;
+  --muted: #8690a8; --accent: #818cf8; --ok: #34d399; --warn: #fbbf24; --bad: #fb7185;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root { --bg: #f4f6fb; --surface: #fff; --surface-2: #eef1f7; --border: #0f172a14; --border-2: #0f172a26; --text: #111827;
+          --muted: #5b6478; --accent: #4f46e5; --ok: #059669; --warn: #d97706; --bad: #e11d48; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14.5px/1.45 var(--font); }
+.page { max-width: 960px; margin: 0 auto; padding: 24px 16px 96px; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+h1 { margin: 0; font-size: 22px; }
+header a { color: var(--muted); font-size: 13px; }
+nav.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 16px 0 20px; position: sticky; top: 0; background: var(--bg); padding: 8px 0; z-index: 5; }
+nav.tabs button { font: inherit; padding: 7px 12px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer; }
+nav.tabs button[aria-pressed="true"] { color: var(--text); border-color: var(--accent); }
+section[hidden] { display: none; }
+h2 { font-size: 16px; margin: 0 0 4px; }
+.lead { color: var(--muted); margin: 0 0 16px; font-size: 13.5px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+.card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.card-head b { font-size: 15px; }
+.badge { font-size: 11px; padding: 2px 7px; border-radius: 99px; border: 1px solid var(--border-2); color: var(--muted); }
+.badge.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.badge.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+.spacer { flex: 1; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 14px; }
+label.f { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+input[type=text], input[type=number], input[type=url], input[type=password], select {
+  font: inherit; font-size: 14px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border-2);
+  border-radius: 8px; padding: 7px 9px; width: 100%; min-width: 0; }
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+.checks { display: grid; gap: 6px; margin: 4px 0; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13.5px; }
+.check input { margin-top: 3px; }
+fieldset { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin: 12px 0 0; }
+legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 4px 12px; max-height: 280px; overflow: auto; padding: 8px 2px; }
+.pick h4 { grid-column: 1 / -1; margin: 6px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.preview { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+button.btn { font: inherit; font-size: 13.5px; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text); cursor: pointer; }
+button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.btn.danger { color: var(--bad); }
+button.btn:disabled { opacity: .5; cursor: default; }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; align-items: center; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 12px; border-top: 0; }
+td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+.dot.up { background: var(--ok); } .dot.down { background: var(--bad); }
+.savebar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--border-2); padding: 12px 16px; display: flex; gap: 12px; align-items: center; justify-content: center; z-index: 10; }
+.savebar[hidden] { display: none; }
+.msg { font-size: 13.5px; }
+.msg.bad { color: var(--bad); } .msg.ok { color: var(--ok); }
+.empty { color: var(--muted); font-size: 13.5px; padding: 6px 0; }
+.act { display: grid; grid-template-columns: 150px 1fr auto; gap: 4px 12px; padding: 9px 0; border-top: 1px solid var(--border); font-size: 13.5px; }
+.act:first-child { border-top: 0; }
+.act .when { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.act .to { font-size: 12px; color: var(--muted); text-align: right; }
+.act .to b { color: var(--accent); font-weight: 600; }
+.errors { border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); color: var(--warn); border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 13px; }
+@media (max-width: 560px) { .act { grid-template-columns: 1fr; } .act .to { text-align: left; } th.hide-sm, td.hide-sm { display: none; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header><h1 id="title">Settings</h1><span class="spacer"></span><a href="./">← Status page</a></header>
+  <div id="errors" class="errors" hidden></div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="notify" aria-pressed="true">Notifications</button>
+    <button data-tab="sites">Sites</button>
+    <button data-tab="hosts">Hosts</button>
+    <button data-tab="checks">Checks</button>
+    <button data-tab="quiet">Quiet hours</button>
+    <button data-tab="activity">Activity</button>
+  </nav>
+
+  <section id="tab-notify">
+    <h2>Where alerts go, and which ones</h2>
+    <p class="lead">Each notifier gets only the kinds of alert you tick. Anything not sent anywhere still shows under Activity.</p>
+    <div id="notifiers"></div>
+    <div class="card">
+      <div class="card-head"><b>Add a notifier</b></div>
+      <div class="grid">
+        <label class="f">Type<select id="new-type">
+          <option value="discord">Discord</option><option value="ntfy">ntfy</option><option value="gotify">Gotify</option>
+          <option value="slack">Slack / Mattermost</option><option value="webhook">Webhook (JSON)</option><option value="email">Email</option>
+        </select></label>
+        <label class="f">Name<input type="text" id="new-name" placeholder="discord"></label>
+      </div>
+      <div class="row-actions"><button class="btn" id="add-notifier">Add</button></div>
+    </div>
+  </section>
+
+  <section id="tab-sites" hidden>
+    <h2>Sites</h2>
+    <p class="lead">A site is a group of hosts and services that share a network, power or a job, like everything on one UPS,
+      or the media stack. It counts as <b>down</b> only when enough of its members are down <i>at the same time</i>, so one
+      machine rebooting isn't a site outage.</p>
+    <div id="sites"></div>
+    <div class="row-actions"><button class="btn" id="add-site">Add a site</button></div>
+  </section>
+
+  <section id="tab-hosts" hidden>
+    <h2>Hosts</h2>
+    <p class="lead">Machines running the Brock agent. Limits here apply to every host unless a host has its own.</p>
+    <div class="card" id="agent-defaults"></div>
+    <div id="hosts"></div>
+  </section>
+
+  <section id="tab-checks" hidden>
+    <h2>Checks</h2>
+    <p class="lead">Everything Brock watches. A muted check is still checked and still shown, it just never sends an alert.</p>
+    <div class="card"><table><thead><tr><th>Check</th><th class="hide-sm">Group</th><th>Mute</th><th></th></tr></thead><tbody id="checks"></tbody></table></div>
+    <div class="card" id="add-check-card"></div>
+  </section>
+
+  <section id="tab-quiet" hidden>
+    <h2>Quiet hours and reminders</h2>
+    <p class="lead">During quiet hours alerts are held and sent as one summary when they end. A notifier can be set to ignore quiet hours.</p>
+    <div class="card"><div class="grid">
+      <label class="f">Quiet hours (e.g. 23:00-07:00, empty for none)<input type="text" id="quiet-hours" placeholder="23:00-07:00"></label>
+      <label class="f">"Still down" reminder every (minutes, 0 = never)<input type="number" id="remind-every" min="0"></label>
+    </div></div>
+  </section>
+
+  <section id="tab-activity" hidden>
+    <h2>Activity</h2>
+    <p class="lead">Every alert Brock raised, newest first, and where it went.</p>
+    <div class="row-actions" style="margin:0 0 12px"><label class="check"><input type="checkbox" id="only-sent"> Only alerts that were sent somewhere</label></div>
+    <div class="card" id="activity"></div>
+  </section>
+</div>
+<div class="savebar" id="savebar" hidden><span class="msg" id="save-msg">You have unsaved changes.</span>
+  <button class="btn" id="discard">Discard</button><button class="btn primary" id="save">Save</button></div>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const TYPES = { discord: "Discord", ntfy: "ntfy", gotify: "Gotify", slack: "Slack", webhook: "Webhook", email: "Email" };
+let V = null;       // what the server says
+let D = null;       // the settings document being edited
+let dirty = false;
+
+// ---- the document ----------------------------------------------------------------
+function normalize(view) {
+  const d = clone(view.doc || {});
+  d.notifiers ||= []; d.routing ||= {}; d.agents ||= {}; d.agents.hosts ||= {}; d.sites ||= []; d.checks ||= [];
+  d.muted ||= []; d.quiet ||= {}; d.remind_every ??= view.remind_every || 0;
+  if (!view.doc.quiet && view.quiet) d.quiet = clone(view.quiet);
+  // Notifiers from brock.toml are edited through routing: start from what they do now.
+  for (const n of view.notifiers.filter((n) => n.source === "config")) {
+    d.routing[n.name] ||= { enabled: n.enabled, events: n.events, only: n.only, format: n.format, ignore_quiet: !!n.ignore_quiet };
+  }
+  for (const n of d.notifiers) {
+    n.events ||= view.events.map((e) => e.id); n.only ||= []; n.format ||= {}; n.enabled ??= true;
+    n.was = n.name;   // lets a renamed notifier keep its saved secrets
+  }
+  return d;
+}
+function touch() { dirty = true; $("#savebar").hidden = false; $("#save-msg").className = "msg"; $("#save-msg").textContent = "You have unsaved changes."; }
+
+// Every notifier, whichever file it lives in, as {n: effective view, r: the editable part}.
+function notifierRows() {
+  const fromConfig = V.notifiers.filter((n) => n.source === "config").map((n) => ({ n, r: D.routing[n.name], config: true }));
+  return [...fromConfig, ...D.notifiers.map((n) => ({ n, r: n, config: false }))];
+}
+
+// ---- rendering --------------------------------------------------------------------
+const sample = { name: "HomeLab", address: "203.0.113.7", status: "DOWN", detail: "3 of 4 down: Plex, Sonarr, NAS",
+                 duration: "12m", group: "Sites", title: "", time: "20:13" };
+function preview(t) { return t ? t.replace(/\{(\w+)\}/g, (m, k) => (k in sample ? sample[k] || V.title : m)) : ""; }
+
+function targetsPicker(r, key) {
+  const only = new Set(r.only || []);
+  const groups = {};
+  for (const s of V.sites) (groups.Sites ||= []).push([s.name, s.name]);
+  for (const h of V.hosts) (groups.Hosts ||= []).push([h.name, h.name]);
+  for (const c of V.checks.filter((c) => c.source !== "site" && c.source !== "agent")) (groups[c.group || "Checks"] ||= []).push([c.id, c.name]);
+  const body = Object.entries(groups).map(([g, items]) => `<h4>${esc(g)}</h4>` + items.map(([id, label]) =>
+    `<label class="check"><input type="checkbox" data-only="${esc(key)}" value="${esc(id)}" ${only.has(id) ? "checked" : ""}> ${esc(label)}</label>`).join("")).join("");
+  return `<details ${only.size ? "open" : ""}><summary>Only for… ${only.size ? `(${only.size} picked)` : "(everything ticked above)"}</summary>
+    <div class="pick">${body || `<div class="empty">Nothing to pick yet.</div>`}</div></details>`;
+}
+
+function notifierCard({ n, r, config }, i) {
+  const key = config ? `routing:${n.name}` : `notifiers:${i}`;
+  const ev = new Set(r.events || []);
+  const fields = config ? "" : `<div class="grid" style="margin-bottom:10px">
+      <label class="f">Name<input type="text" data-k="${key}" data-f="name" value="${esc(r.name)}"></label>
+      ${r.type === "email" ? `
+        <label class="f">SMTP server<input type="text" data-k="${key}" data-f="host" value="${esc(r.host)}"></label>
+        <label class="f">Port<input type="number" data-k="${key}" data-f="port" value="${esc(r.port || 587)}"></label>
+        <label class="f">User<input type="text" data-k="${key}" data-f="user" value="${esc(r.user)}"></label>
+        <label class="f">Password<input type="password" data-k="${key}" data-f="password" value="${esc(r.password)}" autocomplete="new-password"></label>
+        <label class="f">To (comma-separated)<input type="text" data-k="${key}" data-f="to" data-list value="${esc([].concat(r.to || []).join(", "))}"></label>`
+      : `<label class="f" style="grid-column:span 2">${r.type === "discord" ? "Webhook URL (Server settings → Integrations → Webhooks)" : r.type === "ntfy" ? "Topic URL (https://ntfy.sh/your-topic)" : "URL"}
+          <input type="url" data-k="${key}" data-f="url" value="${esc(r.url)}" placeholder="https://"></label>
+        ${["ntfy", "gotify"].includes(r.type) ? `<label class="f">${r.type === "gotify" ? "App token" : "Access token (optional)"}<input type="password" data-k="${key}" data-f="token" value="${esc(r.token)}" autocomplete="new-password"></label>` : ""}`}
+    </div>`;
+  const defaults = { down: "", up: "" };
+  return `<div class="card">
+    <div class="card-head"><b>${esc(n.name || r.name || "(unnamed)")}</b><span class="badge">${esc(TYPES[n.type || r.type] || n.type)}</span>
+      ${config ? `<span class="badge" title="Address and credentials are in brock.toml">from brock.toml</span>` : ""}
+      <span class="spacer"></span>
+      <label class="check"><input type="checkbox" data-k="${key}" data-f="enabled" ${r.enabled !== false ? "checked" : ""}> On</label></div>
+    ${fields}
+    <fieldset><legend>Send these alerts</legend><div class="checks">
+      ${V.events.map((e) => `<label class="check"><input type="checkbox" data-ev="${esc(key)}" value="${e.id}" ${ev.has(e.id) ? "checked" : ""}> ${esc(e.label)}</label>`).join("")}
+    </div>
+    <div class="row-actions" style="margin-top:8px"><button class="btn" data-preset="${esc(key)}">Only "site is down"</button></div></fieldset>
+    ${targetsPicker(r, key)}
+    <details ${Object.keys(r.format || {}).length ? "open" : ""}><summary>Message format</summary>
+      <p class="lead" style="margin:8px 0">Placeholders: ${V.fields.map((f) => `<code>{${f}}</code>`).join(" ")}. Empty uses the default
+        (sites: <code>${esc(V.site_format.down)}</code>).</p>
+      <div class="grid">
+        ${["down", "up"].map((k) => `<label class="f">When ${k === "down" ? "something goes down" : "it's back"}
+          <input type="text" data-k="${key}" data-fmt="${k}" value="${esc((r.format || {})[k] || defaults[k])}" placeholder="${esc(V.site_format[k])}">
+          <span class="preview" data-pv="${esc(key)}:${k}">${esc(preview((r.format || {})[k] || V.site_format[k]))}</span></label>`).join("")}
+      </div></details>
+    <div class="row-actions">
+      <label class="check"><input type="checkbox" data-k="${key}" data-f="ignore_quiet" ${r.ignore_quiet ? "checked" : ""}> Send even during quiet hours</label>
+      <span class="spacer"></span>
+      <button class="btn" data-test="${esc(n.name || r.name)}">Send a test</button>
+      ${config ? "" : `<button class="btn danger" data-del-notifier="${i}">Remove</button>`}
+      <span class="msg" data-test-msg="${esc(n.name || r.name)}"></span></div>
+  </div>`;
+}
+
+function memberPicker(s, si) {
+  const mine = new Set(s.members || []);
+  const groups = {};
+  for (const h of V.hosts) (groups.Hosts ||= []).push([`agent:${h.name}/host`, `${h.name}${h.ip ? ` (${h.ip})` : ""}`]);
+  for (const c of V.checks.filter((c) => c.source !== "site" && c.source !== "agent")) (groups[c.group || "Checks"] ||= []).push([c.id, c.name]);
+  return `<div class="pick">${Object.entries(groups).map(([g, items]) => `<h4>${esc(g)}</h4>` + items.map(([id, label]) =>
+    `<label class="check"><input type="checkbox" data-member="${si}" value="${esc(id)}" ${mine.has(id) ? "checked" : ""}> ${esc(label)}</label>`).join("")).join("")
+    || `<div class="empty">No hosts or checks yet. Install an agent or add a check first.</div>`}</div>`;
+}
+
+function siteCard(s, si, live) {
+  const n = (s.members || []).length;
+  const status = live ? `<span class="badge ${live.status === "up" ? "ok" : live.status === "down" ? "bad" : ""}">${esc(live.status)}</span>
+    <span class="lead" style="margin:0">${esc(live.detail || "")}</span>` : `<span class="badge">not saved yet</span>`;
+  return `<div class="card">
+    <div class="card-head"><b>${esc(s.name || "(unnamed)")}</b>${status}<span class="spacer"></span>
+      <button class="btn danger" data-del-site="${si}">Remove</button></div>
+    <div class="grid">
+      <label class="f">Name<input type="text" data-site="${si}" data-f="name" value="${esc(s.name)}" placeholder="HomeLab"></label>
+      <label class="f">Address shown in alerts (optional)<input type="text" data-site="${si}" data-f="address" value="${esc(s.address)}" placeholder="your public IP, or leave empty"></label>
+      <label class="f">Down when at least…<select data-site="${si}" data-f="count">
+        ${Array.from({ length: Math.max(n, 1) }, (_, k) => k + 1).map((k) => `<option value="${k}" ${(s.count || n) === k ? "selected" : ""}>${k} of ${n} are down</option>`).join("")}
+      </select></label>
+    </div>
+    <fieldset><legend>Members</legend>${memberPicker(s, si)}</fieldset>
+  </div>`;
+}
+
+const AGENT_FIELDS = [["disk_above", "Disk full above (%)", "number"], ["temp_above", "Too hot above (°C)", "number"],
+  ["memory_above", "Memory above (%, 0 = off)", "number"], ["updates_above", "Updates waiting above (0 = off)", "number"],
+  ["missed", "Reports missed before \"stopped reporting\"", "number"], ["ignore_mounts", "Ignore disks (e.g. F:, /boot/efi)", "list"],
+  ["ignore_services", "Ignore services", "list"]];
+
+function agentFields(target, values, placeholders, key) {
+  return `<div class="grid">${AGENT_FIELDS.map(([f, label, kind]) => {
+    const v = values[f], ph = placeholders ? placeholders[f] : "";
+    const shown = kind === "list" ? [].concat(v || []).join(", ") : v ?? "";
+    const phs = kind === "list" ? [].concat(ph || []).join(", ") : ph ?? "";
+    return `<label class="f">${label}<input type="${kind === "number" ? "number" : "text"}" data-agent="${esc(key)}" data-f="${f}" ${kind === "list" ? "data-list" : ""}
+      value="${esc(shown)}" placeholder="${esc(phs)}"></label>`;
+  }).join("")}</div>
+  <div class="checks" style="margin-top:10px">
+    ${[["services", "Alert on failed services"], ["defender", "Alert when Windows Defender is off"]].map(([f, label]) =>
+      `<label class="check"><input type="checkbox" data-agent="${esc(key)}" data-f="${f}" ${(values[f] ?? (placeholders || V.agents)[f]) ? "checked" : ""}> ${label}</label>`).join("")}
+  </div>`;
+}
+
+function hostMuted(h) {
+  const ids = V.checks.filter((c) => c.source === "agent" && c.id.startsWith(`agent:${h}/`)).map((c) => c.id);
+  return ids.length && ids.every((id) => D.muted.includes(id));
+}
+
+function ago(t) {
+  if (!t) return "never";
+  const s = Math.max(0, Date.now() / 1000 - t);
+  return s < 90 ? "just now" : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`;
+}
+
+function render() {
+  $("#title").textContent = `${V.title} · Settings`;
+  document.title = `Settings · ${V.title}`;
+  $("#errors").hidden = !V.errors.length && V.can_save;
+  $("#errors").textContent = [...(V.can_save ? [] : ["Brock has no writable data folder (mount /data), so settings can't be saved."]), ...V.errors].join(" · ");
+
+  const rows = notifierRows();
+  $("#notifiers").innerHTML = rows.length ? rows.map((row, i) => notifierCard(row, row.config ? -1 : D.notifiers.indexOf(row.r))).join("")
+    : `<div class="card empty">No notifiers yet. Add one below.</div>`;
+
+  const liveSites = Object.fromEntries(V.sites.map((s) => [s.name, s]));
+  const fileSites = V.sites.filter((s) => !s.from_page);
+  $("#sites").innerHTML = (fileSites.length ? fileSites.map((s) => `<div class="card"><div class="card-head"><b>${esc(s.name)}</b>
+      <span class="badge ${s.status === "up" ? "ok" : s.status === "down" ? "bad" : ""}">${esc(s.status)}</span><span class="badge">from brock.toml</span></div>
+      <div class="lead" style="margin:0">${esc(s.detail || "")}</div></div>`).join("") : "")
+    + (D.sites.length ? D.sites.map((s, si) => siteCard(s, si, liveSites[s.name])).join("") : `<div class="card empty">No sites yet.</div>`);
+
+  $("#agent-defaults").innerHTML = `<div class="card-head"><b>Every host</b>${V.agents_token ? "" : `<span class="badge bad">no [agents] token in brock.toml: agents can't report yet</span>`}</div>
+    ${agentFields("defaults", D.agents, V.agents, "*")}`;
+  $("#hosts").innerHTML = V.hosts.length ? V.hosts.map((h) => {
+    const o = D.agents.hosts[h.name] || {};
+    return `<div class="card"><div class="card-head"><b>${esc(h.name)}</b><span class="badge">${esc(h.os || "?")}</span>
+        <span class="mono" style="color:var(--muted)">${esc(h.ip || "")}</span><span class="lead" style="margin:0">last report ${ago(h.last)}</span>
+        <span class="spacer"></span><label class="check"><input type="checkbox" data-mute-host="${esc(h.name)}" ${hostMuted(h.name) ? "checked" : ""}> Never alert for this host</label></div>
+      <div class="lead" style="margin:0 0 10px">${esc(h.summary || "")}</div>
+      <details ${Object.keys(o).length ? "open" : ""}><summary>Limits just for ${esc(h.name)}</summary><div style="margin-top:10px">
+        ${agentFields(h.name, o, { ...V.agents, ...D.agents }, h.name)}</div></details></div>`;
+  }).join("") : `<div class="card empty">No agents have reported yet. Install one with the line from the Brock README.</div>`;
+
+  $("#checks").innerHTML = V.checks.filter((c) => c.source !== "site").map((c) => `<tr>
+      <td><span class="dot ${esc(c.status)}"></span>${esc(c.name)}</td><td class="hide-sm">${esc(c.group || "")}</td>
+      <td><input type="checkbox" data-mute="${esc(c.id)}" ${D.muted.includes(c.id) ? "checked" : ""} aria-label="Mute ${esc(c.name)}"></td>
+      <td>${c.from_page ? `<button class="btn danger" data-del-check="${esc(c.name)}">Remove</button>` : ""}</td></tr>`).join("")
+    + D.checks.filter((d) => !V.checks.some((c) => c.name === d.name)).map((d) => `<tr><td>${esc(d.name)} <span class="badge">not saved yet</span></td>
+      <td class="hide-sm">${esc(d.group)}</td><td></td><td><button class="btn danger" data-del-check="${esc(d.name)}">Remove</button></td></tr>`).join("");
+  $("#add-check-card").innerHTML = `<div class="card-head"><b>Add a check</b></div><div class="grid">
+      <label class="f">Name<input type="text" id="nc-name" placeholder="Plex"></label>
+      <label class="f">Type<select id="nc-type"><option value="http">Website (HTTP)</option><option value="tcp">Port (TCP)</option>
+        <option value="ping">Ping</option><option value="dns">DNS name</option><option value="tls">Certificate expiry</option></select></label>
+      <label class="f">Address<input type="text" id="nc-target" placeholder="http://plex.homelab or 10.0.0.130:32400"></label>
+      <label class="f">Group<input type="text" id="nc-group" placeholder="Media"></label>
+    </div><div class="row-actions"><button class="btn" id="add-check">Add</button></div>`;
+
+  $("#quiet-hours").value = D.quiet.hours || "";
+  $("#remind-every").value = D.remind_every || 0;
+}
+
+async function renderActivity() {
+  const r = await fetch("api/activity", { cache: "no-store" });
+  const items = r.ok ? await r.json() : [];
+  const onlySent = $("#only-sent").checked;
+  const shown = items.filter((a) => !onlySent || (a.sent || []).length);
+  const icon = (a) => (a.kind === "up" ? "🟢" : a.kind === "down" ? "🔴" : a.kind === "reminder" ? "🟠" : "•");
+  const word = (a) => ({ down: a.about === "host" ? "stopped reporting" : a.about === "problem" ? "has a problem" : "went down",
+                         up: a.about === "host" ? "is reporting again" : a.about === "problem" ? "is OK again" : "came back",
+                         reminder: "still down" }[a.kind] || a.kind);
+  $("#activity").innerHTML = shown.length ? shown.map((a) => `<div class="act">
+      <span class="when">${new Date(a.at * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+      <span>${icon(a)} <b>${esc(a.check)}</b> ${esc(word(a))}${a.detail ? ` <span class="lead" style="margin:0">· ${esc(a.detail)}</span>` : ""}</span>
+      <span class="to">${a.muted ? "muted" : (a.sent || []).length ? `→ ${a.sent.map((s) => `<b>${esc(s)}</b>`).join(", ")}` : ""}${
+        (a.held || []).length ? ` held for ${a.held.map(esc).join(", ")}` : ""}${!a.muted && !(a.sent || []).length && !(a.held || []).length ? "page only" : ""}</span>
+    </div>`).join("") : `<div class="empty">${onlySent ? "Nothing has been sent yet." : "No alerts yet."}</div>`;
+}
+
+// ---- editing ----------------------------------------------------------------------
+function target(key) {
+  const [kind, id] = key.split(/:(.*)/s);
+  return kind === "routing" ? D.routing[id] : D.notifiers[+id];
+}
+function agentTarget(key) {
+  if (key === "*") return D.agents;
+  return (D.agents.hosts[key] ||= {});
+}
+function valueOf(el) {
+  if (el.type === "checkbox") return el.checked;
+  if ("list" in el.dataset) return el.value.split(",").map((s) => s.trim()).filter(Boolean);
+  if (el.type === "number") return el.value === "" ? null : Number(el.value);
+  return el.value;
+}
+
+document.addEventListener("input", (e) => {
+  const el = e.target;
+  if (el.dataset.k && el.dataset.fmt) {
+    const t = target(el.dataset.k);
+    t.format ||= {};
+    if (el.value.trim()) t.format[el.dataset.fmt] = el.value; else delete t.format[el.dataset.fmt];
+    const pv = document.querySelector(`[data-pv="${CSS.escape(el.dataset.k + ":" + el.dataset.fmt)}"]`);
+    if (pv) pv.textContent = preview(el.value || V.site_format[el.dataset.fmt]);
+  } else if (el.dataset.k && el.dataset.f) {
+    target(el.dataset.k)[el.dataset.f] = valueOf(el);
+  } else if (el.dataset.agent) {
+    const t = agentTarget(el.dataset.agent), v = valueOf(el);
+    if (v === null || (Array.isArray(v) && !v.length && el.dataset.agent !== "*")) delete t[el.dataset.f]; else t[el.dataset.f] = v;
+  } else if (el.dataset.site !== undefined && el.dataset.f) {
+    D.sites[+el.dataset.site][el.dataset.f] = el.dataset.f === "count" ? Number(el.value) : el.value;
+  } else if (el.id === "quiet-hours") {
+    D.quiet = el.value.trim() ? { hours: el.value.trim() } : {};
+  } else if (el.id === "remind-every") {
+    D.remind_every = Number(el.value || 0);
+  } else if (el.id === "only-sent") {
+    return renderActivity();
+  } else return;
+  touch();
+});
+
+document.addEventListener("change", (e) => {
+  const el = e.target;
+  if (el.dataset.ev) {
+    const t = target(el.dataset.ev), s = new Set(t.events || []);
+    el.checked ? s.add(el.value) : s.delete(el.value);
+    t.events = V.events.map((x) => x.id).filter((id) => s.has(id));
+  } else if (el.dataset.only) {
+    const t = target(el.dataset.only), s = new Set(t.only || []);
+    el.checked ? s.add(el.value) : s.delete(el.value);
+    t.only = [...s];
+  } else if (el.dataset.member !== undefined) {
+    const site = D.sites[+el.dataset.member], s = new Set(site.members || []);
+    el.checked ? s.add(el.value) : s.delete(el.value);
+    site.members = [...s];
+    site.count = Math.min(site.count || site.members.length, site.members.length) || site.members.length;
+    render();
+  } else if (el.dataset.mute) {
+    const s = new Set(D.muted);
+    el.checked ? s.add(el.dataset.mute) : s.delete(el.dataset.mute);
+    D.muted = [...s];
+  } else if (el.dataset.muteHost) {
+    const ids = V.checks.filter((c) => c.source === "agent" && c.id.startsWith(`agent:${el.dataset.muteHost}/`)).map((c) => c.id);
+    const s = new Set(D.muted);
+    ids.forEach((id) => (el.checked ? s.add(id) : s.delete(id)));
+    D.muted = [...s];
+  } else return;
+  touch();
+});
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  if (b.dataset.tab) {
+    document.querySelectorAll("#tabs button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    document.querySelectorAll("section[id^=tab-]").forEach((s) => (s.hidden = s.id !== `tab-${b.dataset.tab}`));
+    if (b.dataset.tab === "activity") renderActivity();
+    return;
+  }
+  if (b.dataset.preset) {
+    const t = target(b.dataset.preset);
+    t.events = ["site"];
+    t.format = { down: V.site_format.down, up: V.site_format.up };
+    touch(); render(); return;
+  }
+  if (b.id === "add-notifier") {
+    const type = $("#new-type").value;
+    const name = $("#new-name").value.trim() || type;
+    if (notifierRows().some((r) => (r.n.name || r.r.name) === name)) return alert(`There's already a notifier called ${name}.`);
+    D.notifiers.push({ name, type, enabled: true, events: type === "discord" ? ["site"] : V.events.map((x) => x.id), only: [],
+                       format: type === "discord" ? { down: V.site_format.down, up: V.site_format.up } : {} });
+    $("#new-name").value = "";
+    touch(); render(); return;
+  }
+  if (b.dataset.delNotifier !== undefined) { D.notifiers.splice(+b.dataset.delNotifier, 1); touch(); render(); return; }
+  if (b.id === "add-site") { D.sites.push({ name: "", address: "", members: [], count: 1 }); touch(); render(); return; }
+  if (b.dataset.delSite !== undefined) { D.sites.splice(+b.dataset.delSite, 1); touch(); render(); return; }
+  if (b.id === "add-check") {
+    const c = { name: $("#nc-name").value.trim(), type: $("#nc-type").value, target: $("#nc-target").value.trim(),
+                group: $("#nc-group").value.trim(), every: 60, fail_after: 3 };
+    if (!c.name || !c.target) return alert("A check needs a name and an address.");
+    D.checks.push(c); touch(); render(); return;
+  }
+  if (b.dataset.delCheck) { D.checks = D.checks.filter((c) => c.name !== b.dataset.delCheck); touch(); render(); return; }
+  if (b.dataset.test) {
+    const out = document.querySelector(`[data-test-msg="${CSS.escape(b.dataset.test)}"]`);
+    if (dirty) { out.className = "msg bad"; out.textContent = "Save first, then test."; return; }
+    out.className = "msg"; out.textContent = "Sending…";
+    const r = await fetch("api/settings/test", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                body: JSON.stringify({ notifier: b.dataset.test }) });
+    const d = await r.json().catch(() => ({}));
+    out.className = `msg ${d.ok ? "ok" : "bad"}`;
+    out.textContent = d.ok ? "Sent. Check that it arrived." : `Didn't work: ${d.error || r.status}`;
+    return;
+  }
+  if (b.id === "discard") { D = normalize(V); dirty = false; $("#savebar").hidden = true; render(); return; }
+  if (b.id === "save") {
+    b.disabled = true;
+    try {
+      const r = await fetch("api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(D) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { $("#save-msg").className = "msg bad"; $("#save-msg").textContent = d.error || `Couldn't save (${r.status}).`; return; }
+      V = d; D = normalize(V); dirty = false; render();
+      $("#save-msg").className = "msg ok"; $("#save-msg").textContent = "Saved. Brock is using it now.";
+      setTimeout(() => { if (!dirty) $("#savebar").hidden = true; }, 2500);
+    } finally { b.disabled = false; }
+  }
+});
+
+addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); });
+
+(async () => {
+  const r = await fetch("api/settings", { cache: "no-store" });
+  if (!r.ok) { document.body.innerHTML = `<div class="page"><h1>Settings</h1><p class="lead">Open this page as /settings?token=… with one of Brock's [tokens].</p></div>`; return; }
+  V = await r.json();
+  D = normalize(V);
+  render();
+})();
+</script>
+</body>
+</html>

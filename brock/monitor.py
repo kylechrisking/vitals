@@ -443,7 +443,7 @@ class Monitor:
                 "summary": {"up": sum(r["status"] == "up" for r in rows), "down": sum(r["status"] == "down" for r in rows),
                             "total": len(rows)},
                 "sett": (self.sett.state() if self.sett else None) if full else None,
-                "errors": self.cfg.errors if full else [],
+                "errors": self.cfg.errors if full else [], "full": full,
                 "quiet": self.quiet(now), "held": len(self.held) if full else None}
 
     def bars(self, st: State, now: float, days: int = 30) -> list[float | None]:

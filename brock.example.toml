@@ -61,6 +61,17 @@ type = "dns"
 target = "nas.home.lan"
 expect = "192.168.1.20"     # optional: must resolve to this
 
+# ---- sites ----------------------------------------------------------------------------
+
+# Down only when at least `count` members are down together (all, if count is left out).
+# Members are check names, Sett service names, or "agent:HOST/host" for an agent's host.
+# Easier on the settings page (/settings).
+# [[site]]
+# name = "Office"
+# address = "203.0.113.7"   # shown in alerts: "Office at 203.0.113.7 is DOWN"
+# members = ["agent:BHD01/host", "agent:KKINGD01/host"]
+# count = 2
+
 # ---- host agents ------------------------------------------------------------------
 
 # Machines running the agent report disks, memory, temperatures, failed services,

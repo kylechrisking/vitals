@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from . import agents, config, notify, settings
 from .monitor import Monitor
 
 log = logging.getLogger(__name__)
@@ -25,6 +26,9 @@ AGENT_FILES = {"/agent.py": (HERE / "agent.py", "text/x-python"), "/agent.ps1": 
                "/install.sh": (HERE / "install" / "install.sh", "text/x-shellscript"),
                "/install.ps1": (HERE / "install" / "install.ps1", "text/plain")}
 MAX_REPORT = 256 * 1024
+MAX_SETTINGS = 512 * 1024
+PAGE_CSP = {"Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                                       "script-src 'self' 'unsafe-inline'; img-src 'self' data:"}
 COOKIE = "brock_token"
 
 
@@ -76,7 +80,60 @@ def make_handler(mon: Monitor):
                 host = f"localhost:{mon.cfg.port}"   # it goes into a script: nothing odd gets through
             return f"{proto}://{host}"
 
+        def _json(self, obj, code: int = 200):
+            self._send(code, json.dumps(obj, separators=(",", ":")).encode(), "application/json")
+
+        def _read_json(self, limit: int):
+            n = int(self.headers.get("Content-Length") or 0)
+            if n > limit:
+                raise ValueError("too large")
+            return json.loads(self.rfile.read(n).decode("utf-8-sig") or "null")
+
+        def _same_origin(self) -> bool:
+            """Settings changes come from our own page: JSON (no cross-site form can send
+            that without a preflight) and, when the browser says where from, from here."""
+            if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
+                return False
+            origin = self.headers.get("Origin")
+            return not origin or urlparse(origin).netloc == self.headers.get("Host", "")
+
+        def _settings_write(self, method: str):
+            if not self._authed():
+                return self._json({"error": "token required"}, 401)
+            if not self._same_origin():
+                return self._json({"error": "send JSON from the settings page"}, 403)
+            try:
+                body = self._read_json(MAX_SETTINGS)
+            except ValueError:
+                return self._json({"error": "not JSON, or too large"}, 400)
+            path = urlparse(self.path).path
+            if method == "PUT" and path == "/api/settings":
+                try:
+                    doc = settings.clean(body, settings.load_doc())
+                    settings.save_doc(doc)
+                except settings.Invalid as e:
+                    return self._json({"error": str(e)}, 422)
+                except OSError as e:
+                    return self._json({"error": str(e)}, 500)
+                mon.apply_config(config.load())
+                return self._json(settings_view(mon))
+            if method == "POST" and path == "/api/settings/test":
+                n = next((n for n in mon.cfg.notifiers if n["name"] == (body or {}).get("notifier")), None)
+                if not n:
+                    return self._json({"error": "save the notifier first, then test it"}, 404)
+                try:
+                    notify.SENDERS[n["type"]](n, {"kind": "test", "at": 0}, mon.cfg.title)
+                except Exception as e:
+                    return self._json({"ok": False, "error": str(e)[:300]})
+                return self._json({"ok": True})
+            return self._json({"error": "not found"}, 404)
+
+        def do_PUT(self):
+            self._settings_write("PUT")
+
         def do_POST(self):
+            if urlparse(self.path).path.startswith("/api/settings"):
+                return self._settings_write("POST")
             if urlparse(self.path).path != "/api/report":
                 return self._send(404, b"not found", "text/plain")
             auth = self.headers.get("Authorization", "")
@@ -113,8 +170,19 @@ def make_handler(mon: Monitor):
             if token and self._token_ok(token):
                 # Swap the token in the address bar for a cookie, so it doesn't sit in history.
                 return self._send(302, b"", "text/plain", {
-                    "Location": "./", "Set-Cookie": f"{COOKIE}={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax"})
+                    "Location": "settings" if u.path == "/settings" else "./",
+                    "Set-Cookie": f"{COOKIE}={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax"})
             full = self._authed()
+            if u.path in ("/api/settings", "/api/activity") and not full:
+                return self._json({"error": "token required"}, 401)
+            if u.path == "/settings" and not full:
+                return self._send(401, b"Settings need a token: open /settings?token=...\n", "text/plain; charset=utf-8")
+            if u.path == "/settings":
+                return self._send(200, (WEB / "settings.html").read_bytes(), "text/html; charset=utf-8", PAGE_CSP)
+            if u.path == "/api/settings":
+                return self._json(settings_view(mon))
+            if u.path == "/api/activity":
+                return self._json(list(reversed(mon.activity)))
             if not full and not mon.cfg.public_status:
                 if u.path == "/api/status":
                     return self._send(401, b'{"error":"token required"}', "application/json")
@@ -123,12 +191,41 @@ def make_handler(mon: Monitor):
             if u.path == "/api/status":
                 return self._send(200, json.dumps(mon.status(full), separators=(",", ":")).encode(), "application/json")
             if u.path in ("/", "/index.html"):
-                return self._send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8",
-                                  {"Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; "
-                                                              "script-src 'self' 'unsafe-inline'; img-src 'self' data:"})
+                return self._send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8", PAGE_CSP)
             self._send(404, b"not found", "text/plain")
 
     return Handler
+
+
+def settings_view(mon: Monitor) -> dict:
+    """Everything the settings page shows and edits. Secrets are masked."""
+    doc = settings.load_doc()
+    doc["notifiers"] = [settings.notifier_view(n) for n in doc.get("notifiers") or []]
+    cfg = mon.cfg
+    st = mon.status(True)
+    by_id = {r["id"]: r for r in st["checks"]}
+    checks_out = [{"id": c.id, "name": c.name, "group": c.group or ("Hosts" if c.source == "agent" else ""),
+                   "source": c.source, "type": c.type, "status": (by_id.get(c.id) or {}).get("status", "pending"),
+                   "from_page": c.source == "config" and c.name in {d["name"] for d in doc.get("checks") or []}}
+                  for c in mon.all_checks()]
+    return {
+        "doc": doc,
+        "notifiers": [settings.notifier_view(n) for n in cfg.notifiers],
+        "events": [{"id": e, "label": settings.EVENT_LABELS[e]} for e in settings.EVENTS],
+        "fields": list(settings.FIELDS),
+        "site_format": notify.SITE_FORMAT,
+        "checks": checks_out,
+        "hosts": [{"name": h, "ip": v.get("ip"), "last": v.get("last"), "summary": v.get("summary"),
+                   "os": (v.get("report") or {}).get("os")} for h, v in sorted(mon.hosts.items())],
+        "agents": {k: v for k, v in agents.host_conf(cfg.agents, "").items() if k in settings.AGENT_KEYS},
+        "agent_hosts": cfg.agents.get("hosts") or {},
+        "agents_token": bool(cfg.agents.get("token")),
+        "sites": [{**s, "status": (by_id.get(f"site:{s['name']}") or {}).get("status", "pending"),
+                   "detail": (by_id.get(f"site:{s['name']}") or {}).get("detail", ""),
+                   "from_page": s["name"] in {x["name"] for x in doc.get("sites") or []}} for s in cfg.sites],
+        "quiet": cfg.quiet, "remind_every": cfg.remind_every,
+        "can_save": settings.path() is not None, "title": cfg.title, "errors": cfg.errors,
+    }
 
 
 def serve(mon: Monitor, port: int) -> None:

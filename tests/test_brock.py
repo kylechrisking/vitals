@@ -590,6 +590,60 @@ class AgentHttp(unittest.TestCase):
             self.assertIn(b"def report", r.read())
 
 
+class SettingsApi(unittest.TestCase):
+    def setUp(self):
+        from brock import settings as S
+        self.path = Path(TMP) / "settings.json"
+        if self.path.exists():
+            self.path.unlink()
+        self.m, self.sent = monitor(Check("Plex", "tcp", "x"), tokens={"me": "tok"})
+        self.httpd, self.base = serve(make_handler(self.m))
+        self.S = S
+
+    def tearDown(self):
+        stop(self.httpd)
+        self.m._restore()
+        if self.path.exists():
+            self.path.unlink()
+
+    def call(self, method, path, body=None, headers=None):
+        h = {"Authorization": "Bearer tok", "Content-Type": "application/json", **(headers or {})}
+        r = urllib.request.Request(self.base + path, data=None if body is None else json.dumps(body).encode(),
+                                   method=method, headers=h)
+        try:
+            with urllib.request.urlopen(r, timeout=5) as resp:
+                return resp.status, json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"null")
+
+    def test_needs_token_and_same_origin(self):
+        self.assertEqual(self.call("GET", "/api/settings", headers={"Authorization": ""})[0], 401)
+        self.assertEqual(self.call("PUT", "/api/settings", {}, {"Origin": "http://evil.example"})[0], 403)
+        self.assertEqual(self.call("PUT", "/api/settings", {}, {"Content-Type": "text/plain"})[0], 403)
+
+    def test_save_applies_straight_away(self):
+        status, view = self.call("PUT", "/api/settings", {
+            "notifiers": [{"name": "discord", "type": "discord", "url": "https://discord.com/api/webhooks/1/secret",
+                           "events": ["site"]}],
+            "sites": [{"name": "HomeLab", "members": ["config:Plex"], "count": 1}], "muted": ["config:Plex"]})
+        self.assertEqual(status, 200)
+        self.assertEqual([n["name"] for n in self.m.cfg.notifiers], ["discord"])   # reloaded from files + settings
+        self.assertEqual(self.m.cfg.muted, {"config:Plex"})
+        self.assertEqual([s["name"] for s in view["sites"]], ["HomeLab"])
+        self.assertNotIn("secret", json.dumps(view))                     # never sent back in full
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+
+    def test_bad_input_is_explained(self):
+        status, body = self.call("PUT", "/api/settings", {"quiet": {"hours": "bedtime"}})
+        self.assertEqual(status, 422)
+        self.assertIn("23:00-07:00", body["error"])
+
+    def test_activity(self):
+        self.m.record(Check("Plex", "tcp", "x", fail_after=1), Result(False, "refused"))
+        status, items = self.call("GET", "/api/activity")
+        self.assertEqual((status, items[0]["check"]), (200, "Plex"))
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **k):
         return None

@@ -39,6 +39,31 @@ backups), without you listing any of it.
   every service it was reporting. Restarts of Sett or Brock don't re-send
   alerts for outages that are already known.
 
+## The settings page
+
+Open `http://brock:8098/settings?token=<your token>`. Everything there is
+saved to the data folder and used straight away; `brock.toml` keeps working
+underneath it.
+
+- **Notifications:** add Discord, ntfy, Gotify, Slack, email or webhook
+  notifiers, tick which alerts each one gets, limit one to certain hosts or
+  checks, set its message format, and send a test.
+- **Sites:** a group of hosts and services that share a network, power or a
+  job (everything on one UPS, or the media stack). A site is down only when
+  enough of its members are down *at the same time*, so one PC rebooting
+  isn't an outage. Tick "Only site is down" on a notifier and it gets just
+  `HomeLab at 203.0.113.7 is DOWN` and `... is back UP`.
+- **Hosts:** disk, temperature, memory and update limits for every agent, or
+  for one host; ignore a disk or a service; never alert for a host.
+- **Checks:** mute any check (it's still checked and shown), add or remove
+  your own.
+- **Quiet hours** and reminders.
+- **Activity:** every alert Brock raised, and where it went, including the
+  ones that went nowhere.
+
+A problem like a full disk has to look fine twice in a row before it's "OK
+again", so a value sitting at the limit doesn't alert every other minute.
+
 ## Host agents
 
 A small agent on each machine reports what you can't see from outside:
