@@ -1,5 +1,5 @@
 __pycache__/
 *.pyc
 /data/
-brock.toml
+vitals.toml
 secrets.toml

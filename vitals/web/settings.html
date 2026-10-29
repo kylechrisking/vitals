@@ -118,7 +118,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
 
   <section id="tab-hosts" hidden>
     <h2>Hosts</h2>
-    <p class="lead">Machines running the Brock agent. Limits here apply to every host unless a host has its own.</p>
+    <p class="lead">Machines running the Vitals agent. Limits here apply to every host unless a host has its own.</p>
     <div class="card" id="add-host"></div>
     <div class="card" id="agent-defaults"></div>
     <div id="hosts"></div>
@@ -126,7 +126,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
 
   <section id="tab-checks" hidden>
     <h2>Checks</h2>
-    <p class="lead">Everything Brock watches. A muted check is still checked and still shown, it just never sends an alert.</p>
+    <p class="lead">Everything Vitals watches. A muted check is still checked and still shown, it just never sends an alert.</p>
     <div class="card"><table><thead><tr><th>Check</th><th class="hide-sm">Group</th><th>Mute</th><th></th></tr></thead><tbody id="checks"></tbody></table></div>
     <div class="card" id="add-check-card"></div>
   </section>
@@ -142,7 +142,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
 
   <section id="tab-activity" hidden>
     <h2>Activity</h2>
-    <p class="lead">Every alert Brock raised, newest first, and where it went.</p>
+    <p class="lead">Every alert Vitals raised, newest first, and where it went.</p>
     <div class="row-actions" style="margin:0 0 12px"><label class="check"><input type="checkbox" id="only-sent"> Only alerts that were sent somewhere</label></div>
     <div class="card" id="activity"></div>
   </section>
@@ -166,7 +166,7 @@ function normalize(view) {
   d.notifiers ||= []; d.routing ||= {}; d.agents ||= {}; d.agents.hosts ||= {}; d.sites ||= []; d.checks ||= [];
   d.muted ||= []; d.quiet ||= {}; d.remind_every ??= view.remind_every || 0;
   if (!view.doc.quiet && view.quiet) d.quiet = clone(view.quiet);
-  // Notifiers from brock.toml are edited through routing: start from what they do now.
+  // Notifiers from vitals.toml are edited through routing: start from what they do now.
   for (const n of view.notifiers.filter((n) => n.source === "config")) {
     d.routing[n.name] ||= { enabled: n.enabled, events: n.events, only: n.only, format: n.format, ignore_quiet: !!n.ignore_quiet };
   }
@@ -219,7 +219,7 @@ function notifierCard({ n, r, config }, i) {
   const defaults = { down: "", up: "" };
   return `<div class="card">
     <div class="card-head"><b>${esc(n.name || r.name || "(unnamed)")}</b><span class="badge">${esc(TYPES[n.type || r.type] || n.type)}</span>
-      ${config ? `<span class="badge" title="Address and credentials are in brock.toml">from brock.toml</span>` : ""}
+      ${config ? `<span class="badge" title="Address and credentials are in vitals.toml">from vitals.toml</span>` : ""}
       <span class="spacer"></span>
       <label class="check"><input type="checkbox" data-k="${key}" data-f="enabled" ${r.enabled !== false ? "checked" : ""}> On</label></div>
     ${fields}
@@ -307,7 +307,7 @@ function render() {
   $("#title").textContent = `${V.title} · Settings`;
   document.title = `Settings · ${V.title}`;
   $("#errors").hidden = !V.errors.length && V.can_save;
-  $("#errors").textContent = [...(V.can_save ? [] : ["Brock has no writable data folder (mount /data), so settings can't be saved."]), ...V.errors].join(" · ");
+  $("#errors").textContent = [...(V.can_save ? [] : ["Vitals has no writable data folder (mount /data), so settings can't be saved."]), ...V.errors].join(" · ");
 
   const rows = notifierRows();
   $("#notifiers").innerHTML = rows.length ? rows.map((row, i) => notifierCard(row, row.config ? -1 : D.notifiers.indexOf(row.r))).join("")
@@ -316,7 +316,7 @@ function render() {
   const liveSites = Object.fromEntries(V.sites.map((s) => [s.name, s]));
   const fileSites = V.sites.filter((s) => !s.from_page);
   $("#sites").innerHTML = (fileSites.length ? fileSites.map((s) => `<div class="card"><div class="card-head"><b>${esc(s.name)}</b>
-      <span class="badge ${s.status === "up" ? "ok" : s.status === "down" ? "bad" : ""}">${esc(s.status)}</span><span class="badge">from brock.toml</span></div>
+      <span class="badge ${s.status === "up" ? "ok" : s.status === "down" ? "bad" : ""}">${esc(s.status)}</span><span class="badge">from vitals.toml</span></div>
       <div class="lead" style="margin:0">${esc(s.detail || "")}</div></div>`).join("") : "")
     + (D.sites.length ? D.sites.map((s, si) => siteCard(s, si, liveSites[s.name])).join("") : `<div class="card empty">No sites yet.</div>`);
 
@@ -328,9 +328,9 @@ function render() {
       <div class="cmd"><input type="text" readonly value="${esc(`irm "${origin}/install.ps1?token=${tok}" | iex`)}"><button class="btn" data-copy>Copy</button></div>
       <label class="f">Linux (Proxmox node, LXC, VM, Pi)</label>
       <div class="cmd"><input type="text" readonly value="${esc(`curl -fsSL "${origin}/install.sh?token=${tok}" | sudo sh`)}"><button class="btn" data-copy>Copy</button></div>
-      <p class="lead" style="margin:0">If ${esc(location.host)} isn't how other machines reach Brock, open this page by its LAN address first.</p>`
-    : `<p class="lead" style="margin:0">Agents need a token: set <code>[agents] token</code> in brock.toml.</p>`}`;
-  $("#agent-defaults").innerHTML = `<div class="card-head"><b>Every host</b>${V.agents_token ? "" : `<span class="badge bad">no [agents] token in brock.toml: agents can't report yet</span>`}</div>
+      <p class="lead" style="margin:0">If ${esc(location.host)} isn't how other machines reach Vitals, open this page by its LAN address first.</p>`
+    : `<p class="lead" style="margin:0">Agents need a token: set <code>[agents] token</code> in vitals.toml.</p>`}`;
+  $("#agent-defaults").innerHTML = `<div class="card-head"><b>Every host</b>${V.agents_token ? "" : `<span class="badge bad">no [agents] token in vitals.toml: agents can't report yet</span>`}</div>
     ${agentFields("defaults", D.agents, V.agents, "*")}`;
   $("#hosts").innerHTML = V.hosts.length ? V.hosts.map((h) => {
     const o = D.agents.hosts[h.name] || {};
@@ -340,7 +340,7 @@ function render() {
       <div class="lead" style="margin:0 0 10px">${esc(h.summary || "")}</div>
       <details ${Object.keys(o).length ? "open" : ""}><summary>Limits just for ${esc(h.name)}</summary><div style="margin-top:10px">
         ${agentFields(h.name, o, { ...V.agents, ...D.agents }, h.name)}</div></details></div>`;
-  }).join("") : `<div class="card empty">No agents have reported yet. Install one with the line from the Brock README.</div>`;
+  }).join("") : `<div class="card empty">No agents have reported yet. Install one with the line from the Vitals README.</div>`;
 
   $("#checks").innerHTML = V.checks.filter((c) => c.source !== "site").map((c) => `<tr>
       <td><span class="dot ${esc(c.status)}"></span>${esc(c.name)}</td><td class="hide-sm">${esc(c.group || "")}</td>
@@ -507,7 +507,7 @@ document.addEventListener("click", async (e) => {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { $("#save-msg").className = "msg bad"; $("#save-msg").textContent = d.error || `Couldn't save (${r.status}).`; return; }
       V = d; D = normalize(V); dirty = false; render();
-      $("#save-msg").className = "msg ok"; $("#save-msg").textContent = "Saved. Brock is using it now.";
+      $("#save-msg").className = "msg ok"; $("#save-msg").textContent = "Saved. Vitals is using it now.";
       setTimeout(() => { if (!dirty) $("#savebar").hidden = true; }, 2500);
     } finally { b.disabled = false; }
   }
@@ -517,7 +517,7 @@ addEventListener("beforeunload", (e) => { if (dirty) e.preventDefault(); });
 
 (async () => {
   const r = await fetch("api/settings", { cache: "no-store" });
-  if (!r.ok) { document.body.innerHTML = `<div class="page"><h1>Settings</h1><p class="lead">Open this page as /settings?token=… with one of Brock's [tokens].</p></div>`; return; }
+  if (!r.ok) { document.body.innerHTML = `<div class="page"><h1>Settings</h1><p class="lead">Open this page as /settings?token=… with one of Vitals's [tokens].</p></div>`; return; }
   V = await r.json();
   D = normalize(V);
   render();

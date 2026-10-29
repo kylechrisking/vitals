@@ -8,7 +8,7 @@
     exclude = ["flaresolverr"] # app ids, service names or categories to leave out
     node_health = true         # alert on Proxmox health Sett marks bad (failing disks, pools...)
 
-Sett already probes every service; Brock reads the result. If Sett itself
+Sett already probes every service; Vitals reads the result. If Sett itself
 can't be reached, that is one "Sett" check going down, and the services keep
 their last state rather than all alerting at once.
 """
@@ -55,7 +55,7 @@ class SettFeed:
 
     def fetch(self) -> dict:
         req = urllib.request.Request(f"{self.url}/api/status", headers={
-            "User-Agent": f"brock/{__version__}", "Accept": "application/json",
+            "User-Agent": f"vitals/{__version__}", "Accept": "application/json",
             **({"Authorization": f"Bearer {self.token}"} if self.token else {})})
         opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=_insecure))
         with opener.open(req, timeout=10) as r:

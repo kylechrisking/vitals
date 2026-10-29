@@ -1,6 +1,6 @@
-# Brock
+# Vitals
 
-[![tests](https://github.com/kylechrisking/brock/actions/workflows/ci.yml/badge.svg)](https://github.com/kylechrisking/brock/actions/workflows/ci.yml)
+[![tests](https://github.com/kylechrisking/vitals/actions/workflows/ci.yml/badge.svg)](https://github.com/kylechrisking/vitals/actions/workflows/ci.yml)
 
 A small uptime and alert agent for a homelab or a small office. It checks the
 things you care about, tells your phone when one goes down and again when
@@ -8,7 +8,11 @@ it's back, and keeps a status page with uptime history.
 
 It's one small container: plain Python, no dependencies, about 30 MB of RAM.
 
-Brock is a companion to [Sett](https://github.com/kylechrisking/sett), the
+*Vitals used to be called Brock. An existing install keeps working as it is:
+`brock.toml`, the `BROCK_*` variables, its data folder and agents that are
+already installed are all still read. See [Coming from Brock](#coming-from-brock).*
+
+Vitals is a companion to [Sett](https://github.com/kylechrisking/sett), the
 dashboard that discovers your lab, but it doesn't need it. On its own, you
 list what to watch. Pointed at Sett, it also watches everything Sett found,
 plus the Proxmox health Sett reads (failing disks, degraded ZFS pools, failed
@@ -36,13 +40,13 @@ backups), without you listing any of it.
   it shows only the checks you mark public, without addresses or error
   messages.
 - **When Sett goes away:** you get one "Sett is down" alert, not one for
-  every service it was reporting. Restarts of Sett or Brock don't re-send
+  every service it was reporting. Restarts of Sett or Vitals don't re-send
   alerts for outages that are already known.
 
 ## The settings page
 
-Open `http://brock:8098/settings?token=<your token>`. Everything there is
-saved to the data folder and used straight away; `brock.toml` keeps working
+Open `http://vitals:8098/settings?token=<your token>`. Everything there is
+saved to the data folder and used straight away; `vitals.toml` keeps working
 underneath it.
 
 - **Notifications:** add Discord, ntfy, Gotify, Slack, email or webhook
@@ -58,7 +62,7 @@ underneath it.
 - **Checks:** mute any check (it's still checked and shown), add or remove
   your own.
 - **Quiet hours** and reminders.
-- **Activity:** every alert Brock raised, and where it went, including the
+- **Activity:** every alert Vitals raised, and where it went, including the
   ones that went nowhere.
 
 A problem like a full disk has to look fine twice in a row before it's "OK
@@ -77,7 +81,7 @@ Each host becomes a few checks ("pve1", "pve1 · disk", "pve1 · services"...)
 with the same alerts, quiet hours and uptime as everything else. If a host
 stops reporting, you get "pve1 stopped reporting".
 
-Turn agents on by giving Brock an agent token (letters, digits and
+Turn agents on by giving Vitals an agent token (letters, digits and
 `- _ . ~ + / =`; keep it in the secrets file):
 
 ```toml
@@ -91,7 +95,7 @@ Then on each machine, one line:
 Ubuntu and Proxmox already have):
 
 ```bash
-curl -fsSL "http://brock.lan:8098/install.sh?token=a-long-random-string" | sudo sh
+curl -fsSL "http://vitals.lan:8098/install.sh?token=a-long-random-string" | sudo sh
 ```
 
 It installs a systemd service that runs as an unprivileged throwaway user
@@ -100,28 +104,37 @@ with a read-only view of the system.
 **Windows**, in PowerShell run as Administrator:
 
 ```powershell
-irm "http://brock.lan:8098/install.ps1?token=a-long-random-string" | iex
+irm "http://vitals.lan:8098/install.ps1?token=a-long-random-string" | iex
 ```
 
 It installs a startup task that runs as SYSTEM, with nothing else to
 install. The folder holding the token is readable by SYSTEM and
 Administrators only.
 
+It also puts a dot in the system tray: green when the PC checked in
+recently, red when it can't reach Vitals. Right-click it for **Check in
+now** (reports straight away), the last check-in time, and **Open Vitals**.
+The tray runs as you, with no extra rights, and never sees the agent's token.
+
+Agents keep themselves up to date: when Vitals has a newer agent, each one
+downloads it, checks it, swaps it in and restarts. Running an install line
+again repairs or updates an agent too.
+
 Thresholds (disk 90%, temperature 85°C by default) and per-host overrides
-are under `[agents]` in [brock.example.toml](brock.example.toml).
+are under `[agents]` in [vitals.example.toml](vitals.example.toml).
 
 ## Install
 
 ```bash
-mkdir brock && cd brock
-curl -fsSLO https://raw.githubusercontent.com/kylechrisking/brock/main/compose.example.yaml
-curl -fsSL -o config/brock.toml --create-dirs https://raw.githubusercontent.com/kylechrisking/brock/main/brock.example.toml
-# edit config/brock.toml: what to watch, where to send alerts, a page token
+mkdir vitals && cd vitals
+curl -fsSLO https://raw.githubusercontent.com/kylechrisking/vitals/main/compose.example.yaml
+curl -fsSL -o config/vitals.toml --create-dirs https://raw.githubusercontent.com/kylechrisking/vitals/main/vitals.example.toml
+# edit config/vitals.toml: what to watch, where to send alerts, a page token
 docker compose -f compose.example.yaml up -d
 ```
 
-No tokens in your config? Brock makes its own on first start. Find the link
-with `docker logs brock | grep "first time"`, open it, and a cookie keeps
+No tokens in your config? Vitals makes its own on first start. Find the link
+with `docker logs vitals | grep "first time"`, open it, and a cookie keeps
 you signed in after that. The settings page's Hosts tab then has the one-line
 agent installs, with your address and agent token already filled in.
 
@@ -130,18 +143,18 @@ still tell you when that machine goes down. A Raspberry Pi works well.
 
 ### With Sett
 
-If Sett has sign-in turned on, give Brock an API token there:
+If Sett has sign-in turned on, give Vitals an API token there:
 
 ```toml
 # Sett's secrets file
 [auth]
-api_tokens = { brock = "a-long-random-string" }
+api_tokens = { vitals = "a-long-random-string" }
 ```
 
-and point Brock at it:
+and point Vitals at it:
 
 ```toml
-# Brock's brock.toml
+# Vitals's vitals.toml
 [sett]
 url = "http://sett.lan:8099"
 token = "a-long-random-string"
@@ -153,8 +166,8 @@ or categories).
 ### Trying it out
 
 ```bash
-docker exec brock python -m brock check         # run every check once, now
-docker exec brock python -m brock test-notify   # send a test alert everywhere
+docker exec vitals python -m vitals check         # run every check once, now
+docker exec vitals python -m vitals test-notify   # send a test alert everywhere
 ```
 
 ### Without Docker
@@ -162,25 +175,25 @@ docker exec brock python -m brock test-notify   # send a test alert everywhere
 Python 3.11 or newer, nothing to install:
 
 ```bash
-git clone https://github.com/kylechrisking/brock && cd brock
-BROCK_CONFIG=./brock.toml BROCK_DATA=./data python -m brock
+git clone https://github.com/kylechrisking/vitals && cd vitals
+VITALS_CONFIG=./vitals.toml VITALS_DATA=./data python -m vitals
 ```
 
 ## Settings
 
-[brock.example.toml](brock.example.toml) has every setting with comments.
-Passwords and tokens can go in a second file, `/secrets/brock.toml`, which
+[vitals.example.toml](vitals.example.toml) has every setting with comments.
+Passwords and tokens can go in a second file, `/secrets/vitals.toml`, which
 takes the same `[tokens]`, `[sett]` and `[[notify]]` tables; notifier
 settings are matched by `name`.
 
 | Variable | Default | |
 | --- | --- | --- |
-| `BROCK_CONFIG` | `/config/brock.toml` | the config file |
-| `BROCK_SECRETS` | `/secrets/brock.toml` | the secrets file |
-| `BROCK_DATA` | `/data` | uptime history and incidents |
-| `BROCK_PORT` | `8098` | the status page |
-| `BROCK_SETT_URL`, `BROCK_SETT_TOKEN` | | instead of `[sett]` |
-| `BROCK_NTFY_URL` | | a quick ntfy notifier without a config |
+| `VITALS_CONFIG` | `/config/vitals.toml` | the config file |
+| `VITALS_SECRETS` | `/secrets/vitals.toml` | the secrets file |
+| `VITALS_DATA` | `/data` | uptime history and incidents |
+| `VITALS_PORT` | `8098` | the status page |
+| `VITALS_SETT_URL`, `VITALS_SETT_TOKEN` | | instead of `[sett]` |
+| `VITALS_NTFY_URL` | | a quick ntfy notifier without a config |
 
 `/api/status` returns everything the page shows, as JSON, for your own
 scripts. `/healthz` answers `ok`.
@@ -188,7 +201,20 @@ scripts. `/healthz` answers `ok`.
 ## What's next
 
 - Remote management: patching, installing software and a remote shell on
-  the machines the agent runs on, so Brock can fully replace Action1.
+  the machines the agent runs on, so Vitals can fully replace Action1.
+
+## Coming from Brock
+
+1. Rename the repository on GitHub to `vitals` (Settings → Repository name).
+   GitHub redirects the old address, and the image is then published as
+   `ghcr.io/kylechrisking/vitals`.
+2. In your compose file, change the image to `ghcr.io/kylechrisking/vitals:latest`
+   (and `container_name` if you like), then `docker compose up -d`. Keep the same
+   `config`, `secrets` and `data` folders: `brock.toml` and everything in `/data`
+   are picked up as they are.
+3. Agents already installed keep reporting. To get the tray icon and
+   self-updates, run the install line from the Hosts tab once on each machine;
+   it removes the old Brock agent first.
 
 ## Hacking on it
 

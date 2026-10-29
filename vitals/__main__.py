@@ -1,6 +1,6 @@
-"""python -m brock                    run the agent and its status page
-python -m brock check              run every configured check once and print the results
-python -m brock test-notify [NAME] send a test alert to every notifier (or one)"""
+"""python -m vitals                    run the agent and its status page
+python -m vitals check              run every configured check once and print the results
+python -m vitals test-notify [NAME] send a test alert to every notifier (or one)"""
 from __future__ import annotations
 
 import logging
@@ -14,7 +14,7 @@ from .server import serve
 
 
 def main() -> None:
-    logging.basicConfig(level=os.environ.get("BROCK_LOG", "INFO").upper(),
+    logging.basicConfig(level=(os.environ.get("VITALS_LOG") or os.environ.get("BROCK_LOG") or "INFO").upper(),
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
     args = sys.argv[1:]
     cfg = config.load()

@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from . import __version__
 from .config import Check
 
-USER_AGENT = f"brock/{__version__}"
+USER_AGENT = f"vitals/{__version__}"
 
 _insecure = ssl.create_default_context()
 _insecure.check_hostname = False
@@ -89,7 +89,7 @@ _RTT = re.compile(r"time[=<]\s*([\d.]+)\s*ms")
 
 
 def ping(c: Check) -> Result:
-    """One ICMP echo through the system ping (busybox or iputils), so Brock
+    """One ICMP echo through the system ping (busybox or iputils), so Vitals
     needs no raw-socket privileges of its own."""
     host = c.target.split("://")[-1].split("/")[0]
     cmd = ["ping", "-c", "1", "-W", str(max(1, int(c.timeout))), host]

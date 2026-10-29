@@ -13,7 +13,7 @@ temperatures, failed services, pending updates and Defender's state.
     defender = true               # alert when Windows Defender real-time protection is off
     ignore_mounts = ["/boot/efi"]
     ignore_services = []
-    # server_url = "http://brock.lan:8098"   # what install scripts tell agents (default: the address you used)
+    # server_url = "http://vitals.lan:8098"   # what install scripts tell agents (default: the address you used)
 
     [agents.hosts.nas]            # any of the above, for one host
     disk_above = 95
@@ -32,6 +32,7 @@ from .config import Check
 DEFAULTS = {"every": 60, "missed": 3, "disk_above": 90, "memory_above": 0, "temp_above": 85, "services": True,
             "updates_above": 0, "defender": True, "ignore_mounts": [], "ignore_services": [], "notify": [],
             "public": False, "fail_after": 2}
+AGENT_VERSION = "0.3.0"       # what agent.py and agent.ps1 say; agents that differ update themselves
 FORGET_AFTER = 30 * 86400     # a host silent this long is dropped (and stops alerting)
 MAX_NAME = 64
 

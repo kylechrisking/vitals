@@ -24,17 +24,19 @@ HERE = Path(__file__).parent
 # Agent files, served to machines that present the agent token.
 AGENT_FILES = {"/agent.py": (HERE / "agent.py", "text/x-python"), "/agent.ps1": (HERE / "agent.ps1", "text/plain"),
                "/install.sh": (HERE / "install" / "install.sh", "text/x-shellscript"),
-               "/install.ps1": (HERE / "install" / "install.ps1", "text/plain")}
+               "/install.ps1": (HERE / "install" / "install.ps1", "text/plain"),
+               "/tray.ps1": (HERE / "tray.ps1", "text/plain")}
 MAX_REPORT = 256 * 1024
 MAX_SETTINGS = 512 * 1024
 PAGE_CSP = {"Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; "
                                        "script-src 'self' 'unsafe-inline'; img-src 'self' data:"}
-COOKIE = "brock_token"
+COOKIE = "vitals_token"
+OLD_COOKIES = ("brock_token",)   # still accepted: signed in before the rename
 
 
 def make_handler(mon: Monitor):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "brock"
+        server_version = "vitals"
 
         def log_message(self, fmt, *args):
             log.debug("%s %s", self.address_string(), fmt % args)
@@ -62,7 +64,7 @@ def make_handler(mon: Monitor):
                 return True
             for part in self.headers.get("Cookie", "").split(";"):
                 k, _, v = part.strip().partition("=")
-                if k == COOKIE and self._token_ok(v):
+                if (k == COOKIE or k in OLD_COOKIES) and self._token_ok(v):
                     return True
             return False
 
@@ -149,7 +151,9 @@ def make_handler(mon: Monitor):
             name = mon.agent_report(doc, ip=self.client_address[0]) if isinstance(doc, dict) else None
             if not name:
                 return self._send(400, b'{"error":"report needs a name (letters, digits, - _ .)"}', "application/json")
-            self._send(200, json.dumps({"ok": True, "name": name}).encode(), "application/json")
+            # The agent compares agent_version with its own and updates itself if they differ.
+            self._send(200, json.dumps({"ok": True, "name": name, "agent_version": agents.AGENT_VERSION}).encode(),
+                       "application/json")
 
         def do_HEAD(self):
             self.do_GET()
@@ -247,7 +251,7 @@ def lan_ip() -> str:
 def serve(mon: Monitor, port: int) -> None:
     httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(mon))
     httpd.daemon_threads = True
-    mon.start()   # only once the page is listening, so a check of Brock itself passes from the start
+    mon.start()   # only once the page is listening, so a check of Vitals itself passes from the start
     log.info("status page on :%d%s", port, " (public)" if mon.cfg.public_status else "")
     if mon.cfg.made_tokens.get("page"):
         log.info("first time? open http://%s:%d/settings?token=%s (the token is kept in the data folder)",

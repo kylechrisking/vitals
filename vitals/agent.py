@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Brock agent for Linux: reports this machine's disks, memory, temperatures,
-failed services and pending updates to a Brock server every minute.
+"""Vitals agent for Linux: reports this machine's disks, memory, temperatures,
+failed services and pending updates to a Vitals server every minute.
 
 One file, standard library only. Normally installed by the server's
-install script (see the Brock README); to run it by hand:
+install script (see the Vitals README); to run it by hand:
 
-    BROCK_SERVER=http://brock.lan:8098 BROCK_AGENT_TOKEN=... python3 agent.py
+    VITALS_SERVER=http://vitals.lan:8098 VITALS_AGENT_TOKEN=... python3 agent.py
 
-BROCK_AGENT_NAME overrides the host name; BROCK_AGENT_EVERY the interval (s).
+VITALS_AGENT_NAME overrides the host name; VITALS_AGENT_EVERY the interval (s).
 """
 from __future__ import annotations
 
@@ -18,14 +18,20 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 UPDATES_EVERY = 6 * 3600     # apt/dnf can be slow; pending updates don't change by the minute
 
 # Filesystems worth watching. Everything else (tmpfs, overlay, proc, squashfs snaps...) is noise.
 REAL_FS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs", "vfat", "exfat", "ntfs", "ntfs3",
            "fuseblk", "jfs", "reiserfs", "bcachefs", "nfs", "nfs4", "cifs", "smb3"}
+
+
+def env(name: str, default: str | None = None) -> str | None:
+    """VITALS_<name>, or BROCK_<name> from agents installed before the rename."""
+    return os.environ.get(f"VITALS_{name}") or os.environ.get(f"BROCK_{name}") or default
 
 
 def disks() -> list[dict]:
@@ -147,7 +153,7 @@ def _read(path: str) -> str:
 def report(updates: int | None) -> dict:
     up = _read("/proc/uptime").split()
     return {
-        "agent": VERSION, "os": "linux", "name": os.environ.get("BROCK_AGENT_NAME") or socket.gethostname(),
+        "agent": VERSION, "os": "linux", "name": env("AGENT_NAME") or socket.gethostname(),
         "time": time.time(), "uptime": float(up[0]) if up else None,
         "load": os.getloadavg()[0] if hasattr(os, "getloadavg") else None, "cpus": os.cpu_count(),
         "memory": memory(), "disks": disks(), "temps": temperatures(), "failed_services": failed_services(),
@@ -155,30 +161,64 @@ def report(updates: int | None) -> dict:
     }
 
 
-def send(server: str, token: str, doc: dict) -> None:
+def send(server: str, token: str, doc: dict) -> dict:
     req = urllib.request.Request(f"{server.rstrip('/')}/api/report", data=json.dumps(doc).encode(), method="POST",
                                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}",
-                                          "User-Agent": f"brock-agent/{VERSION}"})
+                                          "User-Agent": f"vitals-agent/{VERSION}"})
     with urllib.request.urlopen(req, timeout=20) as r:
-        r.read()
+        try:
+            return json.loads(r.read() or b"{}")
+        except ValueError:
+            return {}
+
+
+def update(server: str, token: str, want: str) -> bool:
+    """Replace this file with the server's agent and restart into it. Only when the
+    download is complete, is Python, and says it is the version the server offered;
+    otherwise keep running as we are. Returns False if nothing changed."""
+    me = os.path.abspath(__file__)
+    try:
+        with urllib.request.urlopen(f"{server.rstrip('/')}/agent.py?token={urllib.parse.quote(token)}", timeout=30) as r:
+            code = r.read(2 * 1024 * 1024)
+        compile(code, me, "exec")
+        if f'VERSION = "{want}"'.encode() not in code:
+            raise ValueError("downloaded agent isn't the offered version")
+        tmp = me + ".new"
+        with open(tmp, "wb") as f:
+            f.write(code)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, me)
+    except Exception as e:   # read-only install, server away, bad download: carry on as we are
+        print(f"vitals-agent: not updating to {want}: {e}", file=sys.stderr, flush=True)
+        return False
+    print(f"vitals-agent: updated {VERSION} -> {want}, restarting", file=sys.stderr, flush=True)
+    os.execv(sys.executable, [sys.executable, me, *sys.argv[1:]])
+    return True
 
 
 def main() -> int:
-    server, token = os.environ.get("BROCK_SERVER"), os.environ.get("BROCK_AGENT_TOKEN")
+    server, token = env("SERVER"), env("AGENT_TOKEN")
     if not server or not token:
-        print("set BROCK_SERVER and BROCK_AGENT_TOKEN", file=sys.stderr)
+        print("set VITALS_SERVER and VITALS_AGENT_TOKEN", file=sys.stderr)
+        # (BROCK_SERVER / BROCK_AGENT_TOKEN from before the rename work too)
         return 2
-    every = float(os.environ.get("BROCK_AGENT_EVERY", 60))
+    every = float(env("AGENT_EVERY", "60"))
     once = "--once" in sys.argv
     updates, updates_at = None, 0.0
+    tried: dict[str, float] = {}   # version -> when an update to it last failed
     while True:
         if time.monotonic() - updates_at > UPDATES_EVERY or not updates_at:
             updates, updates_at = pending_updates(), time.monotonic()
         doc = report(updates)
         try:
-            send(server, token, doc)
+            answer = send(server, token, doc)
+            offered = answer.get("agent_version")
+            if (offered and offered != VERSION and not once and env("AGENT_NO_UPDATE") is None
+                    and time.monotonic() - tried.get(offered, -1e9) > 3600):
+                update(server, token, offered)   # only returns if it didn't work
+                tried[offered] = time.monotonic()
         except Exception as e:   # the server being away is normal; keep going
-            print(f"brock-agent: could not report: {e}", file=sys.stderr, flush=True)
+            print(f"vitals-agent: could not report: {e}", file=sys.stderr, flush=True)
             if once:
                 return 1
         if once:

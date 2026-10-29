@@ -1,8 +1,8 @@
 services:
-  brock:
-    image: ghcr.io/kylechrisking/brock:latest
+  vitals:
+    image: ghcr.io/kylechrisking/vitals:latest
     # build: .        # or build from a clone of the repo
-    container_name: brock
+    container_name: vitals
     restart: unless-stopped
     ports:
       - "8098:8098"
@@ -10,6 +10,6 @@ services:
     sysctls:
       - net.ipv4.ping_group_range=0 2147483647
     volumes:
-      - ./config:/config:ro     # brock.toml
-      - ./secrets:/secrets:ro   # brock.toml with tokens and notifier passwords (optional)
+      - ./config:/config:ro     # vitals.toml
+      - ./secrets:/secrets:ro   # vitals.toml with tokens and notifier passwords (optional)
       - ./data:/data            # uptime history and incidents

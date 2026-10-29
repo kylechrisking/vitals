@@ -13,15 +13,15 @@ from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-TMP = tempfile.mkdtemp(prefix="brock-test-")
-os.environ["BROCK_DATA"] = TMP
+TMP = tempfile.mkdtemp(prefix="vitals-test-")
+os.environ["VITALS_DATA"] = TMP
 
-from brock import checks, config, notify  # noqa: E402
-from brock.checks import Result  # noqa: E402
-from brock.config import Check, Config  # noqa: E402
-from brock.monitor import Monitor, fmt_duration  # noqa: E402
-from brock.server import make_handler  # noqa: E402
-from brock.sett import SettFeed  # noqa: E402
+from vitals import checks, config, notify  # noqa: E402
+from vitals.checks import Result  # noqa: E402
+from vitals.config import Check, Config  # noqa: E402
+from vitals.monitor import Monitor, fmt_duration  # noqa: E402
+from vitals.server import make_handler  # noqa: E402
+from vitals.sett import SettFeed  # noqa: E402
 
 
 class Now:
@@ -76,7 +76,7 @@ def free_port() -> int:
 class ConfigLoad(unittest.TestCase):
     def test_checks_notifiers_and_secrets(self):
         d = Path(tempfile.mkdtemp())
-        (d / "brock.toml").write_text('''
+        (d / "vitals.toml").write_text('''
 title = "Lab"
 [[check]]
 name = "Router"
@@ -92,11 +92,11 @@ type = "ntfy"
 url = "https://ntfy.sh/x"
 ''')
         (d / "secrets.toml").write_text('[[notify]]\nname = "phone"\ntoken = "tk_123"\n[tokens]\nme = "abc"\n')
-        os.environ.update(BROCK_CONFIG=str(d / "brock.toml"), BROCK_SECRETS=str(d / "secrets.toml"))
+        os.environ.update(VITALS_CONFIG=str(d / "vitals.toml"), VITALS_SECRETS=str(d / "secrets.toml"))
         try:
             cfg = config.load()
         finally:
-            del os.environ["BROCK_CONFIG"], os.environ["BROCK_SECRETS"]
+            del os.environ["VITALS_CONFIG"], os.environ["VITALS_SECRETS"]
         self.assertEqual([c.name for c in cfg.checks], ["Router"])
         self.assertEqual(len(cfg.errors), 1)
         self.assertEqual(cfg.notifiers, [{"name": "phone", "type": "ntfy", "url": "https://ntfy.sh/x", "token": "tk_123",
@@ -181,7 +181,7 @@ def monitor(*cs, **kw) -> tuple[Monitor, list]:
     m.pool = Now()
     notify_send = notify.send
 
-    def capture(n, ev, title="Brock"):
+    def capture(n, ev, title="Vitals"):
         sent.append(ev)
     notify.send = capture
     m._restore = lambda: setattr(notify, "send", notify_send)
@@ -409,7 +409,7 @@ WINDOWS = {"name": "KKINGD01", "os": "windows", "memory": {"used_pct": 55.0},
 
 class Agents(unittest.TestCase):
     def test_evaluate_linux(self):
-        from brock import agents
+        from vitals import agents
         got = {c.name: r for c, r in agents.evaluate("pve1", LINUX, agents.host_conf({}, "pve1"))}
         self.assertTrue(got["pve1"].ok)
         self.assertFalse(got["pve1 · disk"].ok)
@@ -420,7 +420,7 @@ class Agents(unittest.TestCase):
         self.assertEqual(agents.summary(LINUX), "/mnt/tank 93% · RAM 40% · 61°C · 3 updates · reboot pending · up 1d 1h")
 
     def test_overrides_and_ignores(self):
-        from brock import agents
+        from vitals import agents
         conf = agents.host_conf({"disk_above": 80, "ignore_services": ["smartd.service"],
                                  "hosts": {"pve1": {"disk_above": 95}}}, "pve1")
         got = {c.name: r for c, r in agents.evaluate("pve1", LINUX, conf)}
@@ -428,14 +428,14 @@ class Agents(unittest.TestCase):
         self.assertTrue(got["pve1 · services"].ok)
 
     def test_windows_defender_and_updates(self):
-        from brock import agents
+        from vitals import agents
         got = {c.name: r for c, r in agents.evaluate("KKINGD01", WINDOWS, agents.host_conf({"updates_above": 10}, "KKINGD01"))}
         self.assertFalse(got["KKINGD01 · defender"].ok)
         self.assertFalse(got["KKINGD01 · updates"].ok)
         self.assertNotIn("KKINGD01 · temperature", got)
 
     def test_names_are_checked(self):
-        from brock import agents
+        from vitals import agents
         self.assertEqual(agents.clean_name(" pve-1.lan "), "pve-1.lan")
         self.assertIsNone(agents.clean_name("x; rm -rf /"))
         self.assertIsNone(agents.clean_name(""))
@@ -460,7 +460,7 @@ class Agents(unittest.TestCase):
         self.assertEqual(notify.message(ev, "T")[0], "🔴 pve1 · disk: /mnt/tank 93%")
 
     def test_silent_host_is_forgotten(self):
-        from brock import agents
+        from vitals import agents
         self.m, _ = monitor()
         try:
             self.m.agent_report(LINUX, now=1000.0)
@@ -473,7 +473,7 @@ class Agents(unittest.TestCase):
 
 class SitesAndRouting(unittest.TestCase):
     def test_site_down_only_when_members_go_down_together(self):
-        from brock.monitor import SITE_EVERY
+        from vitals.monitor import SITE_EVERY
         pc, bhd = Check("KKINGD01", "tcp", "x", fail_after=1), Check("BHD01", "tcp", "x", fail_after=1)
         self.m, sent = monitor(pc, bhd, sites=[{"name": "Office", "address": "203.0.113.7",
                                                 "members": ["config:KKINGD01", "BHD01"]}])
@@ -497,7 +497,7 @@ class SitesAndRouting(unittest.TestCase):
             self.m._restore()
 
     def test_wants(self):
-        from brock.monitor import wants
+        from vitals.monitor import wants
         ev = {"kind": "down", "about": "host", "check": "KKINGD01", "id": "agent:KKINGD01/host", "group": "Hosts"}
         self.assertTrue(wants({}, ev))                                  # default: everything
         self.assertFalse(wants({"events": ["site"]}, ev))
@@ -535,7 +535,7 @@ class SitesAndRouting(unittest.TestCase):
 
 class SettingsDoc(unittest.TestCase):
     def test_clean_and_masked_secrets(self):
-        from brock import settings as S
+        from vitals import settings as S
         old = {"notifiers": [{"name": "discord", "type": "discord", "url": "https://discord.com/api/webhooks/1/abcdef"}]}
         view = S.notifier_view(old["notifiers"][0])
         self.assertNotIn("abcdef", view["url"][:-4])
@@ -574,7 +574,8 @@ class AgentHttp(unittest.TestCase):
 
     def test_report_needs_the_agent_token(self):
         self.assertEqual(self.post(WINDOWS, "page")[0], 401)
-        self.assertEqual(self.post(WINDOWS, "agent-tok"), (200, {"ok": True, "name": "KKINGD01"}))
+        from vitals.agents import AGENT_VERSION
+        self.assertEqual(self.post(WINDOWS, "agent-tok"), (200, {"ok": True, "name": "KKINGD01", "agent_version": AGENT_VERSION}))
         self.assertIn("KKINGD01", self.m.hosts)
         self.assertEqual(self.post({"name": "bad name!"}, "agent-tok")[0], 400)
 
@@ -592,7 +593,7 @@ class AgentHttp(unittest.TestCase):
 
 class SettingsApi(unittest.TestCase):
     def setUp(self):
-        from brock import settings as S
+        from vitals import settings as S
         self.path = Path(TMP) / "settings.json"
         if self.path.exists():
             self.path.unlink()
@@ -644,9 +645,45 @@ class SettingsApi(unittest.TestCase):
         self.assertEqual((status, items[0]["check"]), (200, "Plex"))
 
 
+class AgentFiles(unittest.TestCase):
+    def test_versions_agree(self):
+        """The server offers AGENT_VERSION; both agents must say the same, or they'd update forever."""
+        from vitals.agents import AGENT_VERSION
+        here = Path(__file__).parent.parent / "vitals"
+        self.assertIn(f'VERSION = "{AGENT_VERSION}"', (here / "agent.py").read_text())
+        self.assertIn(f"$Version = '{AGENT_VERSION}'", (here / "agent.ps1").read_text())
+
+    def test_linux_agent_updates_itself(self):
+        """Serve a newer agent.py; the old one downloads it, checks it, and replaces itself."""
+        import importlib.util
+        import shutil
+        d = Path(tempfile.mkdtemp())
+        src = Path(__file__).parent.parent / "vitals" / "agent.py"
+        shutil.copy(src, d / "agent.py")
+        newer = src.read_text().replace(f'VERSION = "', 'VERSION = "9.9.9" #', 1)
+        Fake.routes = {"/agent.py": (200, newer.encode(), {})}
+        httpd, base = serve(Fake)
+        spec = importlib.util.spec_from_file_location("agent_copy", d / "agent.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        execs = []
+        real_execv = mod.os.execv
+        mod.os.execv = lambda *a: execs.append(a)   # don't really restart the test runner
+        try:
+            self.assertTrue(mod.update(base, "tok", "9.9.9"))
+            self.assertIn('VERSION = "9.9.9"', (d / "agent.py").read_text())
+            self.assertEqual(len(execs), 1)
+            Fake.routes = {"/agent.py": (200, b"this is not python(", {})}
+            self.assertFalse(mod.update(base, "tok", "9.9.9"))   # a broken download changes nothing
+            self.assertIn('VERSION = "9.9.9"', (d / "agent.py").read_text())
+        finally:
+            stop(httpd)
+            mod.os.execv = real_execv
+
+
 class FirstRun(unittest.TestCase):
     def test_tokens_made_once_and_kept(self):
-        from brock import settings as S
+        from vitals import settings as S
         f = Path(TMP) / "tokens.json"
         if f.exists():
             f.unlink()

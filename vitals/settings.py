@@ -1,5 +1,5 @@
 """Settings made on the /settings page, kept in <data>/settings.json and
-layered over brock.toml, which stays the base and still works on its own.
+layered over vitals.toml, which stays the base and still works on its own.
 
     notifiers   notifiers added on the page (type, url, token...)
     routing     per notifier (page or config file): enabled, which events, only-for, message format
@@ -68,7 +68,7 @@ def save_doc(doc: dict) -> None:
 # ---- first run: tokens nobody had to make up ------------------------------------------
 
 def ensure_tokens(cfg: Config) -> dict:
-    """Without [tokens] or an [agents] token in the config, Brock makes its own on
+    """Without [tokens] or an [agents] token in the config, Vitals makes its own on
     first start and keeps them in <data>/tokens.json (mode 600), so the page and
     the agents work without editing a file. Returns the ones it made up."""
     d = data_dir()
@@ -98,7 +98,7 @@ def ensure_tokens(cfg: Config) -> dict:
     return used
 
 
-# ---- applying: brock.toml + settings.json -> the config Brock runs on -------------------
+# ---- applying: vitals.toml + settings.json -> the config Vitals runs on -------------------
 
 def apply(cfg: Config, doc: dict) -> Config:
     routing = doc.get("routing") or {}
@@ -108,7 +108,7 @@ def apply(cfg: Config, doc: dict) -> Config:
     names = {n["name"] for n in cfg.notifiers}
     for n in doc.get("notifiers") or []:
         if n.get("name") in names:
-            cfg.errors.append(f"settings: notifier {n['name']!r} also exists in brock.toml; the page's copy is ignored")
+            cfg.errors.append(f"settings: notifier {n['name']!r} also exists in vitals.toml; the page's copy is ignored")
             continue
         cfg.notifiers.append({**n, "source": "settings"})
         names.add(n["name"])

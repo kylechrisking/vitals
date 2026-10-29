@@ -35,7 +35,7 @@ SITE_FORMAT = {"down": "{name} at {address} is DOWN", "up": "{name} at {address}
 
 def render(template: str, ev: dict, title: str) -> str:
     """Fill {name}, {address}, {status}, {detail}, {duration}, {group}, {title}, {time}.
-    Plain substitution: nothing in a template can reach into Brock's objects."""
+    Plain substitution: nothing in a template can reach into Vitals's objects."""
     from .monitor import fmt_duration
     fields = {"name": ev.get("check", ""), "address": ev.get("address") or ev.get("target") or "",
               "status": {"down": "DOWN", "up": "UP", "reminder": "STILL DOWN"}.get(ev["kind"], ev["kind"].upper()),
@@ -83,11 +83,11 @@ def message(ev: dict, title: str, fmt: dict | None = None) -> tuple[str, str]:
         head = f"Still down: {', '.join(still)}" if still else "Everything that went down has recovered."
         return f"{title}: {len(ev['events'])} alerts during quiet hours", head + "\n\n" + "\n".join(lines)
     if k == "test":
-        return f"{title}: test alert", "If you can read this, Brock can reach you here."
+        return f"{title}: test alert", "If you can read this, Vitals can reach you here."
     return f"{title}: {k}", json.dumps(ev)
 
 
-def send(n: dict, ev: dict, title: str = "Brock") -> bool:
+def send(n: dict, ev: dict, title: str = "Vitals") -> bool:
     for attempt, wait in enumerate((0, *RETRIES)):
         if wait:
             time.sleep(wait)
@@ -102,7 +102,7 @@ def send(n: dict, ev: dict, title: str = "Brock") -> bool:
 
 def _post(url: str, body: bytes, headers: dict, timeout: float = 15) -> None:
     req = urllib.request.Request(url, data=body, method="POST",
-                                 headers={"User-Agent": f"brock/{__version__}", **headers})
+                                 headers={"User-Agent": f"vitals/{__version__}", **headers})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         if r.status >= 300:
             raise RuntimeError(f"HTTP {r.status}")
@@ -148,7 +148,7 @@ def gotify(n: dict, ev: dict, title: str) -> None:
 def discord(n: dict, ev: dict, title: str) -> None:
     subject, body = message(ev, title, n.get("format"))
     text = f"**{subject}**\n{body}" if body else subject
-    _json(n["url"], {"content": text[:2000], "username": n.get("username", "Brock")})
+    _json(n["url"], {"content": text[:2000], "username": n.get("username", "Vitals")})
 
 
 def slack(n: dict, ev: dict, title: str) -> None:

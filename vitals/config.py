@@ -14,7 +14,7 @@
     type = "ntfy"
     url = "https://ntfy.sh/my-lab-alerts"
 
-See brock.example.toml for every setting.
+See vitals.example.toml for every setting.
 """
 from __future__ import annotations
 
@@ -68,20 +68,30 @@ class Config:
     tokens: dict = field(default_factory=dict)           # name -> token for /api/* and the page
     agents: dict = field(default_factory=dict)           # [agents] host agents: token, thresholds, per-host overrides
     muted: set = field(default_factory=set)              # check ids that never notify
-    made_tokens: dict = field(default_factory=dict)      # tokens Brock made itself (no [tokens] / [agents] token)
+    made_tokens: dict = field(default_factory=dict)      # tokens Vitals made itself (no [tokens] / [agents] token)
     sites: list[dict] = field(default_factory=list)      # [[site]] name, address, members (check ids or names), count
     files: dict[str, float] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)      # problems found while loading, shown on the page
 
 
+def env(name: str, default: str | None = None) -> str | None:
+    """VITALS_<name>, or BROCK_<name> as it was called before the rename."""
+    return os.environ.get(f"VITALS_{name}") or os.environ.get(f"BROCK_{name}") or default
+
+
+def _first(*paths: str) -> Path:
+    """The first of these files that exists (vitals.toml, then the older brock.toml), else the first."""
+    return next((Path(p) for p in paths if Path(p).is_file()), Path(paths[0]))
+
+
 def load() -> Config:
-    path = Path(os.environ.get("BROCK_CONFIG", "/config/brock.toml"))
-    secrets_path = Path(os.environ.get("BROCK_SECRETS", "/secrets/brock.toml"))
+    path = Path(env("CONFIG") or _first("/config/vitals.toml", "/config/brock.toml"))
+    secrets_path = Path(env("SECRETS") or _first("/secrets/vitals.toml", "/secrets/brock.toml"))
     raw = _read(path)
     secrets = _read(secrets_path)
     cfg = Config(
         title=raw.get("title", "Status"),
-        port=int(os.environ.get("BROCK_PORT", raw.get("port", 8098))),
+        port=int(env("PORT") or raw.get("port", 8098)),
         sett={**raw.get("sett", {}), **secrets.get("sett", {})},
         quiet=raw.get("quiet", {}),
         maintenance=raw.get("maintenance", []),
@@ -91,10 +101,10 @@ def load() -> Config:
         agents={**raw.get("agents", {}), **secrets.get("agents", {})},
         files={str(path): _mtime(path), str(secrets_path): _mtime(secrets_path)},
     )
-    if os.environ.get("BROCK_SETT_URL"):
-        cfg.sett["url"] = os.environ["BROCK_SETT_URL"]
-    if os.environ.get("BROCK_SETT_TOKEN"):
-        cfg.sett["token"] = os.environ["BROCK_SETT_TOKEN"]
+    if env("SETT_URL"):
+        cfg.sett["url"] = env("SETT_URL")
+    if env("SETT_TOKEN"):
+        cfg.sett["token"] = env("SETT_TOKEN")
 
     seen = set()
     for i, d in enumerate(raw.get("check", [])):
@@ -125,8 +135,8 @@ def load() -> Config:
             cfg.errors.append(f"[[notify]] {n['name']!r}: type must be one of {', '.join(NOTIFY_TYPES)}")
             continue
         cfg.notifiers.append(n)
-    if os.environ.get("BROCK_NTFY_URL"):
-        cfg.notifiers.append({"name": "ntfy-env", "type": "ntfy", "url": os.environ["BROCK_NTFY_URL"]})
+    if env("NTFY_URL"):
+        cfg.notifiers.append({"name": "ntfy-env", "type": "ntfy", "url": env("NTFY_URL")})
     cfg.sites = [s for s in raw.get("site", []) if s.get("name") and s.get("members")]
     from . import settings   # the /settings page's changes, layered on top
     sp = settings.path()
@@ -158,8 +168,8 @@ def changed(cfg: Config) -> bool:
 
 
 def data_dir() -> Path | None:
-    """BROCK_DATA, else /data when mounted, else a temp folder. None if nothing is writable."""
-    for i, c in enumerate([os.environ.get("BROCK_DATA"), "/data", "/tmp/brock"]):
+    """VITALS_DATA (or BROCK_DATA), else /data when mounted, else a temp folder. None if nothing is writable."""
+    for i, c in enumerate([env("DATA"), "/data", "/tmp/vitals"]):
         if not c or (i == 1 and not Path(c).is_dir()):
             continue
         d = Path(c)

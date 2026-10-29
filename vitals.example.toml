@@ -1,18 +1,18 @@
-# Brock config. Mount as /config/brock.toml. Edits apply within a few seconds.
+# Vitals config. Mount as /config/vitals.toml. Edits apply within a few seconds.
 
 title = "Home lab"
 # public_status = true      # anyone can see the page (public checks only, no addresses or errors)
 # remind_every = 60         # minutes between "still down" reminders (0 = never)
 
 # Tokens for the status page and /api/status. Better kept in the secrets file.
-# Open the page once as http://brock:8098/?token=... and a cookie remembers it.
+# Open the page once as http://vitals:8098/?token=... and a cookie remembers it.
 [tokens]
 me = "change-me-to-something-long"
 
 # ---- what to watch -------------------------------------------------------------
 
 # Everything Sett discovered, without listing it again. Optional.
-# If Sett has sign-in, give it an API token there:  [auth] api_tokens = { brock = "..." }
+# If Sett has sign-in, give it an API token there:  [auth] api_tokens = { vitals = "..." }
 [sett]
 url = "http://192.168.1.30:8099"
 # token = "..."              # better in the secrets file

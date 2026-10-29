@@ -61,7 +61,7 @@ footer { margin-top: 28px; text-align: center; }
   <div id="groups"></div>
   <h2 class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin:28px 0 8px 2px">Recent incidents</h2>
   <div id="incidents" class="incidents"></div>
-  <footer class="muted">Brock</footer>
+  <footer class="muted">Vitals</footer>
 </div>
 <script>
 "use strict";
@@ -135,7 +135,7 @@ async function load() {
     if (r.ok) render(await r.json());
     else $("#banner").innerHTML = `<span class="dot down"></span><span>This page needs a token: open it as ?token=…</span>`;
   } catch {
-    $("#updated").textContent = "Can't reach Brock — retrying";
+    $("#updated").textContent = "Can't reach Vitals — retrying";
   }
   setTimeout(load, 15000);
 }
