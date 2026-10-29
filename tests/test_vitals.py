@@ -683,6 +683,57 @@ class CheckIns(unittest.TestCase):
             m._restore()
 
 
+class KumaImport(unittest.TestCase):
+    def make_db(self):
+        import sqlite3
+        f = Path(tempfile.mkdtemp()) / "kuma.db"
+        con = sqlite3.connect(f)
+        con.execute("""CREATE TABLE monitor (id INTEGER PRIMARY KEY, name TEXT, active INTEGER, interval INTEGER, url TEXT,
+                       type TEXT, hostname TEXT, port INTEGER, keyword TEXT, maxretries INTEGER, upside_down INTEGER,
+                       push_token TEXT, parent INTEGER, invert_keyword INTEGER)""")
+        rows = [(1, "Media", 1, 60, None, "group", None, None, None, 0, 0, None, None, 0),
+                (2, "Plex", 1, 30, "http://10.0.0.130:32400/web", "http", None, None, None, 2, 0, None, 1, 0),
+                (3, "Sonarr", 1, 60, "http://10.0.0.130:8989", "keyword", None, None, "Sonarr", 0, 0, None, 1, 0),
+                (4, "NAS SSH", 1, 120, None, "port", "10.0.0.123", 2222, None, 1, 0, None, None, 0),
+                (5, "PBS nightly", 1, 86400, None, "push", None, None, None, 0, 0, "kumaPushTok1", None, 0),
+                (6, "Postgres", 1, 60, None, "postgres", None, None, None, 0, 0, None, None, 0),
+                (7, "Old thing", 0, 60, "http://x", "http", None, None, None, 0, 0, None, None, 0)]
+        con.executemany("INSERT INTO monitor VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        con.commit()
+        con.close()
+        return f
+
+    def test_convert(self):
+        from vitals import kuma
+        checks, notes = kuma.convert(kuma.read(str(self.make_db())))
+        got = {c["name"]: c for c in checks}
+        self.assertEqual(sorted(got), ["NAS SSH", "PBS nightly", "Plex", "Sonarr"])
+        self.assertEqual((got["Plex"]["group"], got["Plex"]["every"], got["Plex"]["fail_after"]), ("Media", 30, 3))
+        self.assertEqual(got["Sonarr"]["contains"], "Sonarr")
+        self.assertEqual(got["NAS SSH"]["target"], "10.0.0.123:2222")
+        self.assertEqual((got["PBS nightly"]["type"], got["PBS nightly"]["token"]), ("push", "kumaPushTok1"))
+        self.assertTrue(any("Postgres" in n for n in notes) and any("Old thing" in n for n in notes))
+
+    def test_import_keeps_push_urls(self):
+        from vitals import config, kuma
+        from vitals import settings as S
+        if S.path().exists():
+            S.path().unlink()
+        os.environ["VITALS_CONFIG"] = str(Path(TMP) / "none.toml")
+        try:
+            self.assertEqual(kuma.main([str(self.make_db())]), 0)
+            self.assertEqual(kuma.main([str(self.make_db())]), 0)      # twice: nothing duplicated
+            cfg = config.load()
+        finally:
+            del os.environ["VITALS_CONFIG"]
+            S.path().unlink()
+        self.assertEqual(sum(c.name == "Plex" for c in cfg.checks), 1)
+        m = Monitor(cfg)
+        push = next(c for c in cfg.checks if c.type == "push")
+        self.assertEqual(m.push_token(push), "kumaPushTok1")
+        self.assertEqual(m.push("kumaPushTok1"), "PBS nightly")
+
+
 class Maintenance(unittest.TestCase):
     def test_daily_and_overnight_windows(self):
         from vitals.monitor import _in_daily_window
@@ -719,6 +770,43 @@ class AgentFiles(unittest.TestCase):
         here = Path(__file__).parent.parent / "vitals"
         self.assertIn(f'VERSION = "{AGENT_VERSION}"', (here / "agent.py").read_text())
         self.assertIn(f"$Version = '{AGENT_VERSION}'", (here / "agent.ps1").read_text())
+
+    def test_powershell_scripts_are_balanced(self):
+        """No PowerShell here to parse them, so at least: every brace, bracket and paren
+        closes, outside strings and comments, and every string ends."""
+        here = Path(__file__).parent.parent / "vitals"
+        for f in (here / "agent.ps1", here / "tray.ps1", here / "install" / "install.ps1"):
+            text, stack, i, line = f.read_text(), [], 0, 1
+            pairs = {")": "(", "}": "{", "]": "["}
+            while i < len(text):
+                ch = text[i]
+                if ch == "\n":
+                    line += 1
+                elif ch == "#":
+                    i = text.find("\n", i) - 1 if "\n" in text[i:] else len(text)
+                elif ch == "'":
+                    j = i + 1
+                    while True:
+                        j = text.index("'", j)          # raises if the string never ends
+                        if text[j + 1:j + 2] == "'":
+                            j += 2
+                            continue
+                        break
+                    line += text[i:j].count("\n")
+                    i = j
+                elif ch == '"':
+                    j = i + 1
+                    while text[j] != '"':
+                        j += 2 if text[j] == "`" else 1
+                    line += text[i:j].count("\n")
+                    i = j
+                elif ch in "({[":
+                    stack.append((ch, line))
+                elif ch in ")}]":
+                    self.assertTrue(stack and stack[-1][0] == pairs[ch], f"{f.name}:{line}: unexpected {ch}")
+                    stack.pop()
+                i += 1
+            self.assertEqual(stack, [], f"{f.name}: unclosed {stack[-1:]}")
 
     def test_linux_agent_updates_itself(self):
         """Serve a newer agent.py; the old one downloads it, checks it, and replaces itself."""

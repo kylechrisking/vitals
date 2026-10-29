@@ -139,7 +139,7 @@ def apply(cfg: Config, doc: dict) -> Config:
                                 fail_after=int(d.get("fail_after", 3)), group=d.get("group", ""),
                                 contains=d.get("contains", ""), expect=d.get("expect", ""),
                                 warn_days=int(d.get("warn_days", 14)), public=bool(d.get("public", True)),
-                                grace=float(d.get("grace", 0))))
+                                grace=float(d.get("grace", 0)), token=str(d.get("token") or "")))
         have.add(d["name"])
     return cfg
 
@@ -240,6 +240,11 @@ def clean(new: dict, old: dict) -> dict:
                               "group": str(d.get("group") or "")[:40], "contains": str(d.get("contains") or ""),
                               "expect": str(d.get("expect") or ""), "warn_days": int(d.get("warn_days") or 14),
                               "public": bool(d.get("public", True))})
+        token = str(d.get("token") or "")
+        if token:
+            if not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", token):
+                raise Invalid(f"{name}: a check-in token is 6-64 letters, digits, - or _")
+            out["checks"][-1]["token"] = token
     return out
 
 

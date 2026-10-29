@@ -207,6 +207,21 @@ scripts. `/healthz` answers `ok`.
 - Remote management: patching, installing software and a remote shell on
   the machines the agent runs on, so Vitals can fully replace Action1.
 
+## Moving over from Uptime Kuma
+
+```bash
+docker run --rm -v /path/to/uptime-kuma/data:/kuma:ro -v ./data:/data \
+  ghcr.io/kylechrisking/vitals python -m vitals import-kuma /kuma/kuma.db --dry-run
+```
+
+Drop `--dry-run` to do it. (Stop Kuma first, or point it at a copy of
+`kuma.db`; a 1.x "Export Backup" `.json` works too.) HTTP, keyword, port,
+ping, DNS and push monitors become checks on the settings page, with their
+names, intervals, retries and groups. Push monitors keep their tokens, and
+Vitals answers the same `/api/push/<token>` URL, so a job that pinged Kuma
+only needs the host in its URL changed. Monitor kinds Vitals doesn't do
+(databases, Docker, MQTT...) are listed and left out.
+
 ## Coming from Brock
 
 1. Rename the repository on GitHub to `vitals` (Settings → Repository name).
