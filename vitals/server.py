@@ -165,7 +165,11 @@ def make_handler(mon: Monitor):
                 doc = json.loads(self.rfile.read(n).decode("utf-8-sig"))
             except ValueError:
                 return self._send(400, b'{"error":"not JSON"}', "application/json")
-            name = mon.agent_report(doc, ip=self.client_address[0]) if isinstance(doc, dict) else None
+            try:
+                name = mon.agent_report(doc, ip=self.client_address[0]) if isinstance(doc, dict) else None
+            except Exception:   # one odd report must never take the server down
+                log.exception("agent report from %s could not be read", self.client_address[0])
+                return self._send(400, b'{"error":"report could not be read; see the Vitals log"}', "application/json")
             if not name:
                 return self._send(400, b'{"error":"report needs a name (letters, digits, - _ .)"}', "application/json")
             # The agent compares agent_version with its own and updates itself if they differ.

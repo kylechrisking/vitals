@@ -21,7 +21,7 @@ import time
 import urllib.parse
 import urllib.request
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 UPDATES_EVERY = 6 * 3600     # apt/dnf can be slow; pending updates don't change by the minute
 
 # Filesystems worth watching. Everything else (tmpfs, overlay, proc, squashfs snaps...) is noise.

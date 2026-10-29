@@ -434,6 +434,19 @@ class Agents(unittest.TestCase):
         self.assertFalse(got["KKINGD01 · updates"].ok)
         self.assertNotIn("KKINGD01 · temperature", got)
 
+    def test_windows_one_item_lists_and_odd_values(self):
+        """What Windows PowerShell 5.1 sends for a PC with one disk and one crashed service."""
+        from vitals import agents
+        odd = {"name": "KKINGD01", "os": "windows", "disks": {"mount": "C:", "used_pct": "96.2", "free": 38900000000},
+               "failed_services": "Spooler", "temps": None, "memory": {"used_pct": 40}, "updates": "4",
+               "defender": "unknown"}
+        doc = agents.normalize(odd)
+        got = {c.name: r for c, r in agents.evaluate("KKINGD01", doc, agents.host_conf({}, "KKINGD01"))}
+        self.assertEqual(got["KKINGD01 · disk"].detail, "C: 96% (36.2 GB free)")
+        self.assertEqual(got["KKINGD01 · services"].detail, "failed: Spooler")
+        self.assertTrue(agents.summary(doc).startswith("C: 96% · RAM 40% · 4 updates"))
+        agents.normalize({"name": "x", "disks": ["garbage", {"mount": None}], "temps": [{"celsius": "hot"}]})
+
     def test_names_are_checked(self):
         from vitals import agents
         self.assertEqual(agents.clean_name(" pve-1.lan "), "pve-1.lan")

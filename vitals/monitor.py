@@ -128,6 +128,7 @@ class Monitor:
         if not name:
             return None
         conf = agents.host_conf(self.cfg.agents, name)
+        doc = agents.normalize(doc)
         with self.lock:
             new = name not in self.hosts
             self.hosts[name] = {"last": now, "report": doc, "summary": agents.summary(doc),

@@ -8,7 +8,7 @@
 param([switch]$Once)
 
 $ErrorActionPreference = 'Stop'
-$Version = '0.3.0'
+$Version = '0.3.1'
 $Dir = Join-Path $env:ProgramData 'Vitals'
 $Config = Get-Content -Raw (Join-Path $Dir 'config.json') | ConvertFrom-Json
 $Server = $Config.server.TrimEnd('/')
@@ -86,8 +86,9 @@ function Get-Report {
         uptime = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalSeconds)
         os_version = "$($os.Caption) $($os.Version)"
         cpu_pct = $load; cpus = [Environment]::ProcessorCount
-        memory = Get-Memory; disks = Get-Disks; temps = @()
-        failed_services = Get-FailedServices
+        # @(...) here, not in the functions: PowerShell unwraps a one-item list a function returns.
+        memory = Get-Memory; disks = @(Get-Disks); temps = @()
+        failed_services = @(Get-FailedServices)
         updates = $Updates; reboot_required = [bool](Test-RebootRequired)
         defender = Get-Defender
     }

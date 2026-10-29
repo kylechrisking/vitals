@@ -32,7 +32,7 @@ from .config import Check
 DEFAULTS = {"every": 60, "missed": 3, "disk_above": 90, "memory_above": 0, "temp_above": 85, "services": True,
             "updates_above": 0, "defender": True, "ignore_mounts": [], "ignore_services": [], "notify": [],
             "public": False, "fail_after": 2}
-AGENT_VERSION = "0.3.0"       # what agent.py and agent.ps1 say; agents that differ update themselves
+AGENT_VERSION = "0.3.1"       # what agent.py and agent.ps1 say; agents that differ update themselves
 FORGET_AFTER = 30 * 86400     # a host silent this long is dropped (and stops alerting)
 MAX_NAME = 64
 
@@ -58,6 +58,46 @@ def _check(host: str, part: str, label: str, conf: dict, fail_after: int | None 
 
 def heartbeat(host: str, conf: dict) -> Check:
     return _check(host, "host", "", conf, fail_after=1)   # "missed" already gives it slack
+
+
+def _num(v) -> float | None:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _list(v) -> list:
+    """Windows PowerShell turns a one-item list into the item itself (and an empty one
+    into nothing), so a report can say {"mount": "C:"} where a list was meant."""
+    if v is None:
+        return []
+    return v if isinstance(v, list) else [v]
+
+
+def normalize(doc: dict) -> dict:
+    """A report in the shape the rest of Vitals expects, whatever the agent's version or
+    platform sent: lists are lists, numbers are numbers, nothing missing that's read."""
+    d = dict(doc)
+    disks = []
+    for x in _list(doc.get("disks")):
+        if isinstance(x, dict) and x.get("mount") is not None and _num(x.get("used_pct")) is not None:
+            disks.append({**x, "mount": str(x["mount"]), "used_pct": _num(x["used_pct"]),
+                          "free": _num(x.get("free")), "total": _num(x.get("total"))})
+    d["disks"] = disks
+    d["temps"] = [{"sensor": str(t.get("sensor", "?")), "celsius": _num(t.get("celsius"))}
+                  for t in _list(doc.get("temps")) if isinstance(t, dict) and _num(t.get("celsius")) is not None]
+    fs = doc.get("failed_services")
+    d["failed_services"] = None if fs is None else [str(s) for s in _list(fs) if s]
+    mem = doc.get("memory")
+    d["memory"] = ({**mem, "used_pct": _num(mem.get("used_pct"))} if isinstance(mem, dict) else {})
+    u = _num(doc.get("updates"))
+    d["updates"] = None if u is None else int(u)
+    d["uptime"] = _num(doc.get("uptime"))
+    d["reboot_required"] = bool(doc.get("reboot_required"))
+    if not isinstance(doc.get("defender"), dict):
+        d["defender"] = None
+    return d
 
 
 def evaluate(host: str, doc: dict, conf: dict) -> list[tuple[Check, Result]]:
