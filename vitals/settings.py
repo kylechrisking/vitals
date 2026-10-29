@@ -33,7 +33,7 @@ SECRET_KEYS = ("url", "token", "password")
 NOTIFIER_KEYS = {"name", "type", "url", "token", "user", "password", "priority", "click", "username", "host", "port",
                  "from", "to", "starttls"}
 ROUTE_KEYS = {"enabled", "events", "only", "format", "ignore_quiet"}
-AGENT_KEYS = {"every", "missed", "disk_above", "memory_above", "temp_above", "updates_above", "services", "defender",
+AGENT_KEYS = {"every", "missed", "disk_above", "disk_days", "memory_above", "temp_above", "updates_above", "services", "defender",
               "ignore_mounts", "ignore_services", "public"}
 MASK = "••••"
 DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -266,7 +266,7 @@ def _route(d: dict, name: str) -> dict:
 
 def _agent(a: dict, who: str) -> dict:
     out = {}
-    for k in ("disk_above", "memory_above", "temp_above", "updates_above"):
+    for k in ("disk_above", "disk_days", "memory_above", "temp_above", "updates_above"):
         if a.get(k) not in (None, ""):
             out[k] = _num(a[k], f"{who}: {k.replace('_', ' ')}", 0, 1000)
     for k in ("every", "missed"):

@@ -29,7 +29,7 @@ import time
 from .checks import Result
 from .config import Check
 
-DEFAULTS = {"every": 60, "missed": 3, "disk_above": 90, "memory_above": 0, "temp_above": 85, "services": True,
+DEFAULTS = {"every": 60, "missed": 3, "disk_above": 90, "disk_days": 7, "memory_above": 0, "temp_above": 85, "services": True,
             "updates_above": 0, "defender": True, "ignore_mounts": [], "ignore_services": [], "notify": [],
             "public": False, "fail_after": 2}
 AGENT_VERSION = "0.3.1"       # what agent.py and agent.ps1 say; agents that differ update themselves
@@ -107,10 +107,16 @@ def evaluate(host: str, doc: dict, conf: dict) -> list[tuple[Check, Result]]:
     disks = [d for d in doc.get("disks") or [] if d.get("mount") not in set(conf["ignore_mounts"])]
     if disks:
         limit = float(conf["disk_above"])
+        soon_days = float(conf.get("disk_days") or 0)
+        forecast = doc.get("forecast") or {}
         full = [d for d in disks if float(d.get("used_pct", 0)) > limit]
+        filling = [d for d in disks if d not in full and soon_days
+                   and forecast.get(d["mount"]) is not None and forecast[d["mount"]] < soon_days]
         worst = max(disks, key=lambda d: float(d.get("used_pct", 0)))
-        detail = ", ".join(f"{d['mount']} {d['used_pct']:.0f}% ({_size(d.get('free'))} free)" for d in (full or [worst]))
-        out.append((_check(host, "disk", "disk", conf, 1), Result(not full, detail)))
+        parts = [f"{d['mount']} {d['used_pct']:.0f}% ({_size(d.get('free'))} free)" for d in full]
+        parts += [f"{d['mount']} full in ~{_days(forecast[d['mount']])} ({d['used_pct']:.0f}% now)" for d in filling]
+        detail = ", ".join(parts) or f"{worst['mount']} {worst['used_pct']:.0f}% ({_size(worst.get('free'))} free)"
+        out.append((_check(host, "disk", "disk", conf, 1), Result(not (full or filling), detail)))
 
     mem = doc.get("memory") or {}
     if mem.get("used_pct") is not None and float(conf["memory_above"]):
@@ -156,6 +162,11 @@ def summary(doc: dict) -> str:
     temps = doc.get("temps") or []
     if temps:
         parts.append(f"{max(float(t['celsius']) for t in temps):.0f}°C")
+    fc = doc.get("forecast") or {}
+    if fc:
+        mount = min(fc, key=fc.get)
+        if fc[mount] < 30:
+            parts.append(f"{mount} full in ~{_days(fc[mount])}")
     if doc.get("updates"):
         parts.append(f"{doc['updates']} update{'s' if doc['updates'] != 1 else ''}")
     if doc.get("reboot_required"):
@@ -169,6 +180,29 @@ def missed(last: float, conf: dict, now: float | None = None) -> float | None:
     """Seconds since the last report if the host is overdue, else None."""
     since = (now or time.time()) - last
     return since if since > float(conf["every"]) * float(conf["missed"]) else None
+
+
+def _days(d: float) -> str:
+    return f"{d * 24:.0f} hours" if d < 1 else f"{d:.0f} day" + ("" if round(d) == 1 else "s")
+
+
+def forecast(samples: list[list[float]], now: float, window: float = 7 * 86400) -> float | None:
+    """Days until a disk reaches 100%, from [time, used %] samples: a straight line
+    through the last week. None when it isn't filling, or there's too little to go on
+    (under 6 samples or 6 hours)."""
+    pts = [(t, p) for t, p in samples if now - t <= window]
+    if len(pts) < 6 or pts[-1][0] - pts[0][0] < 6 * 3600:
+        return None
+    n = len(pts)
+    mt = sum(t for t, _ in pts) / n
+    mp = sum(p for _, p in pts) / n
+    var = sum((t - mt) ** 2 for t, _ in pts)
+    if not var:
+        return None
+    slope = sum((t - mt) * (p - mp) for t, p in pts) / var * 86400   # % per day
+    if slope < 0.05:
+        return None   # flat, shrinking, or too slow to matter
+    return max(0.0, (100.0 - pts[-1][1]) / slope)
 
 
 def _size(n) -> str:

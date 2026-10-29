@@ -65,6 +65,7 @@ class Monitor:
         self.held: list[dict] = []       # alerts held back by quiet hours
         self.hosts: dict[str, dict] = {}  # agent name -> {"last": time, "report": doc, "summary": str, "ip": str}
         self.activity: deque = deque(maxlen=KEEP_ACTIVITY)   # every alert, sent or not, newest last
+        self.disk_history: dict[str, dict[str, list]] = {}  # host -> disk -> [[time, used %], ...] hourly
         self.lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=32, thread_name_prefix="check")
         self.running: set[str] = set()
@@ -129,6 +130,7 @@ class Monitor:
             return None
         conf = agents.host_conf(self.cfg.agents, name)
         doc = agents.normalize(doc)
+        doc["forecast"] = self._disk_trend(name, doc, now)
         with self.lock:
             new = name not in self.hosts
             self.hosts[name] = {"last": now, "report": doc, "summary": agents.summary(doc),
@@ -139,6 +141,23 @@ class Monitor:
             self.states.setdefault(c.id, State(since=now)).last_run = now
             self.record(c, r, now)
         return name
+
+    def _disk_trend(self, host: str, doc: dict, now: float) -> dict[str, float]:
+        """Keep an hourly used-% sample per disk for 30 days; return days-until-full per disk."""
+        hist = self.disk_history.setdefault(host, {})
+        out = {}
+        for d in doc.get("disks") or []:
+            s = hist.setdefault(d["mount"], [])
+            if not s or now - s[-1][0] >= 3600:
+                s.append([now, round(float(d["used_pct"]), 2)])
+                del s[:-720]
+            days = agents.forecast(s + ([[now, float(d["used_pct"])]] if now - s[-1][0] > 0 else []), now)
+            if days is not None:
+                out[d["mount"]] = round(days, 1)
+        for m in [m for m in hist if m not in {d["mount"] for d in doc.get("disks") or []}]:
+            if hist[m] and now - hist[m][-1][0] > 30 * 86400:
+                del hist[m]
+        return out
 
     def _agent_heartbeats(self, now: float) -> None:
         for name, h in list(self.hosts.items()):
@@ -514,7 +533,7 @@ class Monitor:
             return
         with self.lock:
             doc = {"v": 1, "saved": time.time(), "incidents": self.incidents, "hosts": self.hosts,
-                   "activity": list(self.activity),
+                   "activity": list(self.activity), "disk_history": self.disk_history,
                    "states": {k: s.to_json() for k, s in self.states.items()}}
         tmp = f"{self.state_file}.tmp"
         try:
@@ -533,6 +552,8 @@ class Monitor:
             self.hosts = {k: v for k, v in (doc.get("hosts") or {}).items()
                           if isinstance(v, dict) and "last" in v and isinstance(v.get("report"), dict)}
             self.activity.extend(a for a in doc.get("activity") or [] if isinstance(a, dict))
+            self.disk_history = {h: {m: [list(x) for x in s] for m, s in v.items()}
+                                 for h, v in (doc.get("disk_history") or {}).items() if isinstance(v, dict)}
             open_by_id = {i["id"]: n for n, i in enumerate(self.incidents) if i.get("end") is None and "id" in i}
             for cid, d in doc.get("states", {}).items():
                 st = State(status=d.get("status", "pending"), since=float(d.get("since", 0)),

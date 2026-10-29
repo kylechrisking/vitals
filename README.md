@@ -124,6 +124,10 @@ Agents keep themselves up to date: when Vitals has a newer agent, each one
 downloads it, checks it, swaps it in and restarts. Running an install line
 again repairs or updates an agent too.
 
+Vitals also keeps a month of each disk's usage and warns ahead of time when
+one is filling: "pve3 · disk: /tank full in ~5 days" (7 days' notice by
+default; change it, or turn it off, on the Hosts tab).
+
 Thresholds (disk 90%, temperature 85°C by default) and per-host overrides
 are under `[agents]` in [vitals.example.toml](vitals.example.toml).
 

@@ -447,6 +447,28 @@ class Agents(unittest.TestCase):
         self.assertTrue(agents.summary(doc).startswith("C: 96% · RAM 40% · 4 updates"))
         agents.normalize({"name": "x", "disks": ["garbage", {"mount": None}], "temps": [{"celsius": "hot"}]})
 
+    def test_disk_forecast(self):
+        from vitals import agents
+        t0 = 1_000_000.0
+        rising = [[t0 + h * 3600, 80 + h * 0.1] for h in range(48)]          # +2.4% a day from 84.7%
+        self.assertAlmostEqual(agents.forecast(rising, t0 + 47 * 3600), (100 - 84.7) / 2.4, places=1)
+        self.assertIsNone(agents.forecast([[t0 + h * 3600, 70.0] for h in range(48)], t0 + 47 * 3600))   # flat
+        self.assertIsNone(agents.forecast(rising[:3], t0 + 2 * 3600))                                  # too little
+
+    def test_filling_disk_alerts_before_the_limit(self):
+        m, sent = monitor()
+        try:
+            t0 = 1_000_000.0
+            for h in range(30):   # a disk at 60% gaining 2% an hour: full in well under a day
+                m.agent_report({"name": "pve3", "os": "linux", "disks": [{"mount": "/tank", "used_pct": 60 + 2 * h, "free": 1}]},
+                               now=t0 + h * 3600)
+            disk = [e for e in sent if e["check"] == "pve3 · disk"]
+            self.assertEqual(disk[0]["kind"], "down")
+            self.assertIn("/tank full in ~", disk[0]["detail"])
+            self.assertIn("/tank full in ~", m.hosts["pve3"]["summary"])
+        finally:
+            m._restore()
+
     def test_names_are_checked(self):
         from vitals import agents
         self.assertEqual(agents.clean_name(" pve-1.lan "), "pve-1.lan")

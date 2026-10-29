@@ -281,7 +281,7 @@ function siteCard(s, si, live) {
   </div>`;
 }
 
-const AGENT_FIELDS = [["disk_above", "Disk full above (%)", "number"], ["temp_above", "Too hot above (°C)", "number"],
+const AGENT_FIELDS = [["disk_above", "Disk full above (%)", "number"], ["disk_days", "Warn when a disk will fill within (days, 0 = off)", "number"], ["temp_above", "Too hot above (°C)", "number"],
   ["memory_above", "Memory above (%, 0 = off)", "number"], ["updates_above", "Updates waiting above (0 = off)", "number"],
   ["missed", "Reports missed before \"stopped reporting\"", "number"], ["ignore_mounts", "Ignore disks (e.g. F:, /boot/efi)", "list"],
   ["ignore_services", "Ignore services", "list"]];
