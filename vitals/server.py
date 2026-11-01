@@ -257,6 +257,7 @@ def settings_view(mon: Monitor) -> dict:
         "maintenance_file": [{k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in w.items()}
                              for w in cfg.maintenance if w not in (doc.get("maintenance") or [])],
         "can_save": settings.path() is not None, "title": cfg.title, "errors": cfg.errors,
+        "persistent": config.data_persistent(),
     }
 
 

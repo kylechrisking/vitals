@@ -173,6 +173,28 @@ def changed(cfg: Config) -> bool:
     return any(_mtime(Path(f)) != m for f, m in cfg.files.items())
 
 
+def data_persistent() -> bool:
+    """Will the data folder survive a rebuild of the container? True when VITALS_DATA/BROCK_DATA
+    was set, or /data is a mounted volume (the image has an empty /data of its own)."""
+    d = data_dir()
+    if not d:
+        return False
+    if env("DATA"):
+        return True
+    return d == Path("/data") and _mounted(d)
+
+
+def _mounted(path: Path) -> bool:
+    """Is `path` a volume or bind mount (so it outlives the container)?"""
+    try:
+        with open("/proc/self/mountinfo") as f:
+            if any(line.split()[4] == str(path) for line in f if len(line.split()) > 4):
+                return True
+    except OSError:
+        pass
+    return os.path.ismount(path)
+
+
 def data_dir() -> Path | None:
     """VITALS_DATA (or BROCK_DATA), else /data when mounted, else a temp folder. None if nothing is writable."""
     for i, c in enumerate([env("DATA"), "/data", "/tmp/vitals"]):

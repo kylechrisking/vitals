@@ -30,6 +30,9 @@ def main() -> None:
         print(__doc__)
         return
     mon = Monitor(cfg)
+    if not config.data_persistent():
+        logging.getLogger("vitals").warning("no /data volume: settings, uptime history and tokens are kept inside the "
+                                            "container and lost when it's rebuilt (mount a folder at /data)")
 
     def stop(signum, frame):
         mon.save()

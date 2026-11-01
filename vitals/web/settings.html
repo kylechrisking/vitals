@@ -319,8 +319,10 @@ function ago(t) {
 function render() {
   $("#title").textContent = V.title;
   document.title = `Settings · ${V.title}`;
-  $("#errors").hidden = !V.errors.length && V.can_save;
-  $("#errors").textContent = [...(V.can_save ? [] : ["Vitals has no writable data folder (mount /data), so settings can't be saved."]), ...V.errors].join(" · ");
+  const warn = !V.can_save ? ["Vitals has no writable data folder (mount /data), so settings can't be saved."]
+    : !V.persistent ? ["Settings, history and tokens are being saved inside the container and will be lost when it's rebuilt. Mount a folder at /data (in compose.yaml: - ./data:/data)."] : [];
+  $("#errors").hidden = !V.errors.length && !warn.length;
+  $("#errors").textContent = [...warn, ...V.errors].join(" · ");
 
   const rows = notifierRows();
   $("#notifiers").innerHTML = rows.length ? rows.map((row, i) => notifierCard(row, row.config ? -1 : D.notifiers.indexOf(row.r))).join("")
