@@ -75,6 +75,8 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
 .act .to b { color: var(--accent); font-weight: 600; }
 .cmd { display: flex; gap: 8px; margin: 6px 0 12px; }
 .cmd input { font-family: var(--mono); font-size: 12.5px; }
+.warn-box { border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); color: var(--warn); border-radius: 10px;
+            padding: 9px 12px; font-size: 13px; margin-bottom: 4px; }
 .errors { border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); color: var(--warn); border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 13px; }
 @media (max-width: 560px) { .act { grid-template-columns: 1fr; } .act .to { text-align: left; } th.hide-sm, td.hide-sm { display: none; } }
 </style>
@@ -209,6 +211,17 @@ function targetsPicker(r, key) {
     <div class="pick">${body || `<div class="empty">Nothing to pick yet.</div>`}</div></details>`;
 }
 
+// Would this notifier ever send anything, as things stand? Say so plainly when it won't.
+function silentWhy(r) {
+  if (r.enabled === false) return "";
+  const ev = r.events || [];
+  if (!ev.length) return "No alert kinds are ticked, so this notifier will never send anything.";
+  const sites = V.sites.length + D.sites.filter((s) => s.name && !V.sites.some((x) => x.name === s.name)).length;
+  if (ev.every((e) => e === "site" || e === "reminder" || e === "digest") && !sites)
+    return "There are no sites yet, so this notifier (which only takes site alerts) will never send anything. Add a site under Sites, or tick more kinds below.";
+  return "";
+}
+
 function notifierCard({ n, r, config }, i) {
   const key = config ? `routing:${n.name}` : `notifiers:${i}`;
   const ev = new Set(r.events || []);
@@ -231,6 +244,7 @@ function notifierCard({ n, r, config }, i) {
       <span class="spacer"></span>
       <label class="check"><input type="checkbox" data-k="${key}" data-f="enabled" ${r.enabled !== false ? "checked" : ""}> On</label></div>
     ${fields}
+    ${silentWhy(r) ? `<div class="warn-box">${esc(silentWhy(r))}</div>` : ""}
     <fieldset><legend>Send these alerts</legend><div class="checks">
       ${V.events.map((e) => `<label class="check"><input type="checkbox" data-ev="${esc(key)}" value="${e.id}" ${ev.has(e.id) ? "checked" : ""}> ${esc(e.label)}</label>`).join("")}
     </div>
@@ -462,6 +476,7 @@ document.addEventListener("change", (e) => {
     const t = target(el.dataset.ev), s = new Set(t.events || []);
     el.checked ? s.add(el.value) : s.delete(el.value);
     t.events = V.events.map((x) => x.id).filter((id) => s.has(id));
+    touch(); render(); return;   // re-check the "will never send anything" warning
   } else if (el.dataset.only) {
     const t = target(el.dataset.only), s = new Set(t.only || []);
     el.checked ? s.add(el.value) : s.delete(el.value);
@@ -505,6 +520,7 @@ document.addEventListener("click", async (e) => {
     document.querySelectorAll("#tabs button").forEach((x) => x.setAttribute("aria-pressed", x === b));
     document.querySelectorAll("section[id^=tab-]").forEach((s) => (s.hidden = s.id !== `tab-${b.dataset.tab}`));
     if (b.dataset.tab === "activity") renderActivity();
+    else render();   // e.g. a site added on one tab clears a warning on another
     return;
   }
   if (b.dataset.preset) {
@@ -517,8 +533,7 @@ document.addEventListener("click", async (e) => {
     const type = $("#new-type").value;
     const name = $("#new-name").value.trim() || type;
     if (notifierRows().some((r) => (r.n.name || r.r.name) === name)) return alert(`There's already a notifier called ${name}.`);
-    D.notifiers.push({ name, type, enabled: true, events: type === "discord" ? ["site"] : V.events.map((x) => x.id), only: [],
-                       format: type === "discord" ? { down: V.site_format.down, up: V.site_format.up } : {} });
+    D.notifiers.push({ name, type, enabled: true, events: V.events.map((x) => x.id), only: [], format: {} });
     $("#new-name").value = "";
     touch(); render(); return;
   }
