@@ -665,8 +665,11 @@ class Monitor:
 
 
 def site_check(site: dict) -> Check:
+    # Down only once it has stayed down `minutes` (default 3): a quick blip of every member
+    # (a PC rebooting, a Wi-Fi hiccup) stays on the page instead of paging anyone.
+    minutes = float(site.get("minutes", 3) or 0)
     return Check(name=site["name"], type="site", target=site.get("address") or "", every=SITE_EVERY,
-                 fail_after=2, group="Sites", source="site", key=site["name"], public=bool(site.get("public", True)))
+                 fail_after=max(2, round(minutes * 60 / SITE_EVERY)), group="Sites", source="site", key=site["name"], public=bool(site.get("public", True)))
 
 
 def wants(n: dict, ev: dict) -> bool:

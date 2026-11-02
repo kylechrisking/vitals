@@ -213,8 +213,10 @@ def clean(new: dict, old: dict) -> dict:
         if not members:
             raise Invalid(f"site {name}: pick the hosts and services that make it up")
         count = int(_num(s.get("count") or len(members), f"site {name}: how many must be down", 1, len(members)))
+        minutes = _num(s.get("minutes", 3) if s.get("minutes") not in (None, "") else 3,
+                       f"site {name}: minutes", 0, 240)
         out["sites"].append({"name": name, "address": str(s.get("address") or "").strip()[:100],
-                             "members": members, "count": count})
+                             "members": members, "count": count, "minutes": minutes})
 
     out["maintenance"] = []
     for i, w in enumerate(new.get("maintenance") or []):

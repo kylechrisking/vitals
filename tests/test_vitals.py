@@ -510,7 +510,7 @@ class SitesAndRouting(unittest.TestCase):
     def test_site_down_only_when_members_go_down_together(self):
         from vitals.monitor import SITE_EVERY
         pc, bhd = Check("KKINGD01", "tcp", "x", fail_after=1), Check("BHD01", "tcp", "x", fail_after=1)
-        self.m, sent = monitor(pc, bhd, sites=[{"name": "Office", "address": "203.0.113.7",
+        self.m, sent = monitor(pc, bhd, sites=[{"name": "Office", "address": "203.0.113.7", "minutes": 0,
                                                 "members": ["config:KKINGD01", "BHD01"]}])
         self.m.cfg.notifiers = [{"name": "discord", "type": "discord", "url": "x", "events": ["site"]}]
         try:
@@ -530,6 +530,11 @@ class SitesAndRouting(unittest.TestCase):
                              "Office at 203.0.113.7 is DOWN")
         finally:
             self.m._restore()
+
+    def test_site_waits_out_short_blips(self):
+        from vitals.monitor import site_check
+        self.assertEqual(site_check({"name": "S"}).fail_after, 12)            # 3 minutes of 15s rounds
+        self.assertEqual(site_check({"name": "S", "minutes": 0}).fail_after, 2)
 
     def test_wants(self):
         from vitals.monitor import wants

@@ -298,6 +298,8 @@ function siteCard(s, si, live) {
     <div class="grid">
       <label class="f">Name<input type="text" data-site="${si}" data-f="name" value="${esc(s.name)}" placeholder="HomeLab"></label>
       <label class="f">Address shown in alerts (optional)<input type="text" data-site="${si}" data-f="address" value="${esc(s.address)}" placeholder="your public IP, or leave empty"></label>
+      <label class="f">…and only after (minutes)<input type="number" min="0" max="240" data-site="${si}" data-f="minutes"
+        value="${esc(s.minutes ?? 3)}"></label>
       <label class="f">Down when at least…<select data-site="${si}" data-f="count">
         ${Array.from({ length: Math.max(n, 1) }, (_, k) => k + 1).map((k) => `<option value="${k}" ${(s.count || n) === k ? "selected" : ""}>${k} of ${n} are down</option>`).join("")}
       </select></label>
@@ -502,7 +504,7 @@ document.addEventListener("input", (e) => {
     const t = agentTarget(el.dataset.agent), v = valueOf(el);
     if (v === null || (Array.isArray(v) && !v.length && el.dataset.agent !== "*")) delete t[el.dataset.f]; else t[el.dataset.f] = v;
   } else if (el.dataset.site !== undefined && el.dataset.f) {
-    D.sites[+el.dataset.site][el.dataset.f] = el.dataset.f === "count" ? Number(el.value) : el.value;
+    D.sites[+el.dataset.site][el.dataset.f] = ["count", "minutes"].includes(el.dataset.f) ? Number(el.value) : el.value;
   } else if (el.dataset.mw !== undefined) {
     D.maintenance[+el.dataset.mw][el.dataset.f] = valueOf(el);
   } else if (el.id === "quiet-hours") {
