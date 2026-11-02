@@ -399,7 +399,13 @@ function render() {
     ${agentFields("defaults", D.agents, V.agents, "*")}`;
   $("#hosts").innerHTML = V.hosts.length ? V.hosts.map((h) => {
     const o = D.agents.hosts[h.name] || {};
-    return `<div class="card"><div class="card-head"><b>${esc(h.name)}</b><span class="badge">${esc(h.os || "?")}</span>
+    // Agents before 0.3 (from Brock) can't update themselves: those need the install line once.
+    const ver = h.agent || "?";
+    const old = !h.agent || h.agent.split(".").map(Number) < [0, 3] || /^0\.[0-2]\./.test(h.agent);
+    const agentBadge = ver === V.agent_version ? `<span class="badge ok">agent ${esc(ver)}</span>`
+      : old ? `<span class="badge bad" title="Run the install line from Add a host on this machine">agent ${esc(ver)} · reinstall</span>`
+      : `<span class="badge" title="It updates itself on its next report">agent ${esc(ver)} · updating</span>`;
+    return `<div class="card"><div class="card-head"><b>${esc(h.name)}</b><span class="badge">${esc(h.os || "?")}</span>${agentBadge}
         <span class="mono" style="color:var(--muted)">${esc(h.ip || "")}</span><span class="lead" style="margin:0">last report ${ago(h.last)}</span>
         <span class="spacer"></span><label class="check"><input type="checkbox" data-mute-host="${esc(h.name)}" ${hostMuted(h.name) ? "checked" : ""}> Never alert for this host</label></div>
       <div class="lead" style="margin:0 0 10px">${esc(h.summary || "")}</div>

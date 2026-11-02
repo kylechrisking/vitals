@@ -252,7 +252,9 @@ def settings_view(mon: Monitor) -> dict:
         "site_format": notify.SITE_FORMAT,
         "checks": checks_out,
         "hosts": [{"name": h, "ip": v.get("ip"), "last": v.get("last"), "summary": v.get("summary"),
-                   "os": (v.get("report") or {}).get("os")} for h, v in sorted(mon.hosts.items())],
+                   "os": (v.get("report") or {}).get("os"), "agent": (v.get("report") or {}).get("agent")}
+                  for h, v in sorted(mon.hosts.items())],
+        "agent_version": agents.AGENT_VERSION,
         "agents": {k: v for k, v in agents.host_conf(cfg.agents, "").items() if k in settings.AGENT_KEYS},
         "agent_hosts": cfg.agents.get("hosts") or {},
         "agents_token": bool(cfg.agents.get("token")),
