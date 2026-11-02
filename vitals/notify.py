@@ -82,6 +82,8 @@ def message(ev: dict, title: str, fmt: dict | None = None) -> tuple[str, str]:
         still = ev.get("still_down") or []
         head = f"Still down: {', '.join(still)}" if still else "Everything that went down has recovered."
         return f"{title}: {len(ev['events'])} alerts during quiet hours", head + "\n\n" + "\n".join(lines)
+    if k == "weekly":
+        return f"{title}: the week in review ({ev.get('headline', '')})", "\n".join(ev.get("lines") or [])
     if k == "test":
         return f"{title}: test alert", "If you can read this, Vitals can reach you here."
     return f"{title}: {k}", json.dumps(ev)

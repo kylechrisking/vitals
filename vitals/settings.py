@@ -23,11 +23,12 @@ from pathlib import Path
 
 from .config import CHECK_TYPES, NOTIFY_TYPES, Check, Config, data_dir
 
-EVENTS = ("site", "host", "service", "problem", "reminder", "digest")
+EVENTS = ("site", "host", "service", "problem", "reminder", "digest", "weekly")
 EVENT_LABELS = {"site": "Sites going down / back up (several members down together)",
                 "host": "Hosts going offline / back online", "service": "Services going down / back up",
                 "problem": "Problems: disk, temperature, services, Defender, updates, certificates",
-                "reminder": "Still-down reminders", "digest": "Summary after quiet hours"}
+                "reminder": "Still-down reminders", "digest": "Summary after quiet hours",
+                "weekly": "Weekly summary (Monday 09:00): uptime, outages, hosts"}
 FIELDS = ("name", "address", "status", "detail", "duration", "group", "title", "time")
 SECRET_KEYS = ("url", "token", "password")
 NOTIFIER_KEYS = {"name", "type", "url", "token", "user", "password", "priority", "click", "username", "host", "port",

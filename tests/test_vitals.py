@@ -769,6 +769,34 @@ class KumaImport(unittest.TestCase):
         self.assertEqual(m.push("kumaPushTok1"), "PBS nightly")
 
 
+class Weekly(unittest.TestCase):
+    def test_monday_morning_only_to_notifiers_that_ask(self):
+        from vitals.monitor import last_monday_9
+        c = Check("Plex", "tcp", "x", fail_after=1)
+        m, sent = monitor(c, sites=[{"name": "HomeLab", "members": ["Plex"]}])
+        m.cfg.notifiers = [{"name": "phone", "type": "webhook", "url": "x", "events": ["weekly"]},
+                           {"name": "discord", "type": "discord", "url": "x", "events": ["site"]}]
+        try:
+            mon = datetime(2026, 11, 2, 9, 0).timestamp()          # a Monday, 09:00
+            self.assertEqual(last_monday_9(mon + 3600), mon)
+            self.assertEqual(last_monday_9(mon - 60), mon - 7 * 86400)
+            m.record(c, Result(False, "refused"), mon - 86400)
+            m.record(c, Result(True), mon - 86400 + 600)
+            m._weekly(mon - 3600)                                   # first run: remember, don't send
+            self.assertEqual(sent, [])
+            m._weekly(mon + 60)
+            [ev] = [e for e in sent if e["kind"] == "weekly"]
+            self.assertIn("Plex 1x, 10m", " ".join(ev["lines"]))
+            subject, body = notify.message(ev, "Lab")
+            self.assertTrue(subject.startswith("Lab: the week in review"))
+            m._weekly(mon + 120)                                    # once per week
+            self.assertEqual(len([e for e in sent if e["kind"] == "weekly"]), 1)
+            m._weekly(mon + 7 * 86400 + 13 * 3600)                  # Vitals was down: skipped, not late
+            self.assertEqual(len([e for e in sent if e["kind"] == "weekly"]), 1)
+        finally:
+            m._restore()
+
+
 class Maintenance(unittest.TestCase):
     def test_daily_and_overnight_windows(self):
         from vitals.monitor import _in_daily_window

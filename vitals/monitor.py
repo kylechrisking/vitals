@@ -65,7 +65,8 @@ class Monitor:
         self.held: list[dict] = []       # alerts held back by quiet hours
         self.hosts: dict[str, dict] = {}  # agent name -> {"last": time, "report": doc, "summary": str, "ip": str}
         self.activity: deque = deque(maxlen=KEEP_ACTIVITY)   # every alert, sent or not, newest last
-        self.disk_history: dict[str, dict[str, list]] = {}  # host -> disk -> [[time, used %], ...] hourly
+        self.disk_history: dict[str, dict[str, list]] = {}
+        self.last_weekly = 0.0                           # when the last weekly summary was due  # host -> disk -> [[time, used %], ...] hourly
         self.lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=32, thread_name_prefix="check")
         self.running: set[str] = set()
@@ -219,6 +220,7 @@ class Monitor:
             self.pool.submit(self._run, c)
         self._agent_heartbeats(now)
         self._sites(now)
+        self._weekly(now)
         self._remind(now)
         self._flush_held(now)
 
@@ -440,6 +442,55 @@ class Monitor:
         for n in targets:
             self.pool.submit(notify.send, n, ev, self.cfg.title)
 
+    # ---- the weekly summary -----------------------------------------------------------------
+
+    def _weekly(self, now: float) -> None:
+        """Monday 09:00 local time: the week in review, to notifiers that take "weekly".
+        A summary missed by more than 12 hours (Vitals was down) is skipped, not sent late."""
+        due = last_monday_9(now)
+        if due <= self.last_weekly:
+            return
+        first = not self.last_weekly
+        self.last_weekly = due
+        if first or now - due > 12 * 3600:
+            return
+        ev = self.weekly_summary(now)
+        targets = [n for n in self.cfg.notifiers if wants(n, ev)]
+        with self.lock:
+            self.activity.append({"kind": "weekly", "about": "weekly", "check": "Weekly summary", "at": now,
+                                  "detail": ev["headline"], "sent": [n["name"] for n in targets], "held": [], "muted": False})
+        for n in targets:
+            self.pool.submit(notify.send, n, ev, self.cfg.title)
+
+    def weekly_summary(self, now: float) -> dict:
+        week = now - 7 * 86400
+        by_id = self.by_id()
+        lines = []
+        sites = [c for c in by_id.values() if c.source == "site"]
+        if sites:
+            lines.append("Sites: " + ", ".join(f"{c.name} {_pct(self.uptime(self.states.get(c.id) or State(), 168, now))}"
+                                              for c in sites))
+        outages: dict[str, list[float]] = {}
+        for i in self.incidents:
+            if (i.get("end") or now) >= week and not i.get("maintenance"):
+                outages.setdefault(i["check"], []).append(min(i.get("end") or now, now) - max(i["start"], week))
+        if outages:
+            worst = sorted(outages.items(), key=lambda kv: -sum(kv[1]))[:8]
+            lines.append("Down this week: " + "; ".join(
+                f"{name} {len(d)}x, {fmt_duration(sum(d))}" for name, d in worst))
+        else:
+            lines.append("Nothing went down this week.")
+        if self.hosts:
+            problems = [c.name for c in by_id.values() if c.source == "agent" and not c.key.endswith("/host")
+                        and (self.states.get(c.id) or State()).status == "down"]
+            lines.append(f"Hosts: {len(self.hosts)} reporting" + (f"; problems now: {', '.join(problems)}" if problems else ", no problems"))
+            filling = [f"{h} {m} full in ~{d:.0f}d" for h, v in self.hosts.items()
+                       for m, d in ((v.get("report") or {}).get("forecast") or {}).items() if d < 30]
+            if filling:
+                lines.append("Filling up: " + ", ".join(filling))
+        headline = f"{len(outages)} {'thing' if len(outages) == 1 else 'things'} went down" if outages else "a quiet week"
+        return {"kind": "weekly", "about": "weekly", "at": now, "lines": lines, "headline": headline}
+
     def address(self, c: Check) -> str:
         """Where a check points, for messages: a host's IP, a URL's host, a host:port's host."""
         if c.source == "agent":
@@ -533,7 +584,7 @@ class Monitor:
             return
         with self.lock:
             doc = {"v": 1, "saved": time.time(), "incidents": self.incidents, "hosts": self.hosts,
-                   "activity": list(self.activity), "disk_history": self.disk_history,
+                   "activity": list(self.activity), "disk_history": self.disk_history, "last_weekly": self.last_weekly,
                    "states": {k: s.to_json() for k, s in self.states.items()}}
         tmp = f"{self.state_file}.tmp"
         try:
@@ -552,6 +603,7 @@ class Monitor:
             self.hosts = {k: v for k, v in (doc.get("hosts") or {}).items()
                           if isinstance(v, dict) and "last" in v and isinstance(v.get("report"), dict)}
             self.activity.extend(a for a in doc.get("activity") or [] if isinstance(a, dict))
+            self.last_weekly = float(doc.get("last_weekly") or 0)
             self.disk_history = {h: {m: [list(x) for x in s] for m, s in v.items()}
                                  for h, v in (doc.get("disk_history") or {}).items() if isinstance(v, dict)}
             open_by_id = {i["id"]: n for n, i in enumerate(self.incidents) if i.get("end") is None and "id" in i}
@@ -585,8 +637,8 @@ def wants(n: dict, ev: dict) -> bool:
         return True
     events = n.get("events")
     events = EVENTS if events is None else events
-    if ev["kind"] == "digest":
-        return "digest" in events
+    if ev["kind"] in ("digest", "weekly"):
+        return ev["kind"] in events
     if ev.get("about", "service") not in events or (ev["kind"] == "reminder" and "reminder" not in events):
         return False
     only = n.get("only") or []
@@ -607,6 +659,19 @@ def about(c: Check) -> str:
 
 
 _DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def last_monday_9(now: float) -> float:
+    """The most recent Monday 09:00 (local time) at or before `now`."""
+    t = datetime.fromtimestamp(now)
+    monday = (t - timedelta(days=t.weekday())).replace(hour=9, minute=0, second=0, microsecond=0)
+    if monday > t:
+        monday -= timedelta(days=7)
+    return monday.timestamp()
+
+
+def _pct(v: float | None) -> str:
+    return "–" if v is None else ("100%" if v >= 99.995 else f"{v:.2f}%")
 
 
 def _in_daily_window(now: float, days: list[str], start: str, end: str) -> bool:

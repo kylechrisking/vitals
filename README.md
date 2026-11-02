@@ -34,6 +34,9 @@ backups), without you listing any of it.
   it stays down.
 - **Where alerts go:** ntfy, Gotify, Discord, Slack (and anything that takes
   Slack webhooks, like Mattermost), email, or any webhook as JSON.
+- **Weekly summary:** Monday 09:00, the week in review (site uptime, what
+  went down and for how long, host problems, disks filling) to any notifier
+  that ticks "Weekly summary".
 - **Quiet hours:** alerts overnight are held and sent as one summary in the
   morning, saying what's still down. Individual notifiers can opt out.
 - **Maintenance windows,** one-off or repeating (every night 03:00-03:30,
