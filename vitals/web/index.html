@@ -155,8 +155,10 @@ function render() {
   $("#title").textContent = d.title;
   $("#nav").hidden = !d.full;
   $("#updated").textContent = `Updated ${new Date(now * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${d.quiet ? " · quiet hours" : ""}`;
-  $("#errors").hidden = !(d.errors || []).length;
-  $("#errors").textContent = (d.errors || []).join(" · ");
+  const notes = [...(d.errors || [])];
+  if (d.update) notes.unshift(`Update available (${d.update.latest}: ${d.update.message}). On the Vitals host: docker compose pull && docker compose up -d`);
+  $("#errors").hidden = !notes.length;
+  $("#errors").textContent = notes.join(" · ");
 
   const sites = d.checks.filter((c) => c.source === "site");
   const hostRows = d.checks.filter((c) => c.source === "agent" && c.id.endsWith("/host"));
