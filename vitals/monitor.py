@@ -555,6 +555,7 @@ class Monitor:
             inc = self.incidents[st.incident] if st.incident is not None and st.incident < len(self.incidents) else {}
             row = {"id": c.id, "name": c.name, "group": c.group or ("Sett" if c.source == "sett" else ""),
                    "acked": bool(inc.get("acked")),
+                   "last_ping": st.last_ping or None if c.type == "push" else None,
                    "type": c.type, "status": "maintenance" if self.in_maintenance(c, now) else st.status,
                    "since": st.since, "latency_ms": st.latency_ms, "source": c.source,
                    "uptime": {"24h": self.uptime(st, 24, now), "7d": self.uptime(st, 24 * 7, now),

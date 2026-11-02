@@ -714,6 +714,7 @@ class CheckIns(unittest.TestCase):
             with self.assertRaises(urllib.error.HTTPError):
                 urllib.request.urlopen(f"{base}/api/push/nope", timeout=5)
             self.assertEqual(m.states[c.id].status, "up")
+            self.assertIsNotNone(next(r for r in m.status(True)["checks"] if r["id"] == c.id)["last_ping"])
         finally:
             stop(httpd)
             m._restore()

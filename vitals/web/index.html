@@ -120,7 +120,8 @@ let data = null, query = "";
 
 function statusWord(c, now) {
   return c.status === "maintenance" ? "maintenance" : c.status === "pending" ? (c.type === "push" ? "waiting for first check-in" : "checking…")
-    : c.status === "down" ? `down ${dur(now - c.since)}` : "up";
+    : c.status === "down" ? `down ${dur(now - c.since)}`
+    : c.type === "push" && c.last_ping ? `checked in ${dur(now - c.last_ping)} ago` : "up";
 }
 function bars(c) {
   return `<div class="bars" aria-label="Daily uptime, last 30 days">${(c.bars || []).map((v, i) =>
