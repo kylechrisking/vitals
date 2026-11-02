@@ -163,7 +163,8 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
   <section id="tab-activity" hidden>
     <h2>Activity</h2>
     <p class="lead">Every alert Vitals raised, newest first, and where it went.</p>
-    <div class="row-actions" style="margin:0 0 12px"><label class="check"><input type="checkbox" id="only-sent"> Only alerts that were sent somewhere</label></div>
+    <div class="row-actions" style="margin:0 0 12px"><label class="check"><input type="checkbox" id="only-sent"> Only alerts that were sent somewhere</label>
+      <input type="text" id="act-q" placeholder="Search (host, check, text)" style="max-width:260px"></div>
     <div class="card" id="activity"></div>
   </section>
 </div>
@@ -456,7 +457,9 @@ async function renderActivity() {
   const r = await fetch("api/activity", { cache: "no-store" });
   const items = r.ok ? await r.json() : [];
   const onlySent = $("#only-sent").checked;
-  const shown = items.filter((a) => !onlySent || (a.sent || []).length);
+  const q = ($("#act-q").value || "").trim().toLowerCase();
+  const shown = items.filter((a) => (!onlySent || (a.sent || []).length)
+    && (!q || `${a.check} ${a.detail || ""} ${a.address || ""} ${(a.sent || []).join(" ")}`.toLowerCase().includes(q)));
   const icon = (a) => (a.kind === "up" ? "🟢" : a.kind === "down" ? "🔴" : a.kind === "reminder" ? "🟠" : "•");
   const word = (a) => ({ down: a.about === "host" ? "stopped reporting" : a.about === "problem" ? "has a problem" : "went down",
                          up: a.about === "host" ? "is reporting again" : a.about === "problem" ? "is OK again" : "came back",
@@ -506,7 +509,7 @@ document.addEventListener("input", (e) => {
     D.quiet = el.value.trim() ? { hours: el.value.trim() } : {};
   } else if (el.id === "remind-every") {
     D.remind_every = Number(el.value || 0);
-  } else if (el.id === "only-sent") {
+  } else if (el.id === "only-sent" || el.id === "act-q") {
     return renderActivity();
   } else return;
   touch();
