@@ -382,6 +382,15 @@ class Monitor:
             ev["down_for"] = now - (self.incidents[st.incident]["start"] if st.incident is not None else st.since)
         return ev
 
+    def acknowledge(self, check_id: str, who: str = "", now: float | None = None) -> bool:
+        """Someone knows about this outage: no more reminders for it. Ends with the outage."""
+        with self.lock:
+            st = self.states.get(check_id)
+            if not st or st.status != "down" or st.incident is None:
+                return False
+            self.incidents[st.incident]["acked"] = {"at": now or time.time(), "by": who[:40]}
+        return True
+
     def _remind(self, now: float) -> None:
         every = self.cfg.remind_every * 60
         if not every:
@@ -389,7 +398,8 @@ class Monitor:
         checks_by_id = self.by_id()
         for cid, st in list(self.states.items()):
             c = checks_by_id.get(cid)
-            if c and st.status == "down" and st.alerted and now - st.last_reminder >= every:
+            acked = st.incident is not None and self.incidents[st.incident].get("acked")
+            if c and st.status == "down" and st.alerted and not acked and now - st.last_reminder >= every:
                 st.last_reminder = now
                 self.dispatch(self._event("reminder", c, st, now), c, now)
 
@@ -542,7 +552,9 @@ class Monitor:
             if not full and not c.public:
                 continue
             st = self.states.get(c.id) or State(since=now)
+            inc = self.incidents[st.incident] if st.incident is not None and st.incident < len(self.incidents) else {}
             row = {"id": c.id, "name": c.name, "group": c.group or ("Sett" if c.source == "sett" else ""),
+                   "acked": bool(inc.get("acked")),
                    "type": c.type, "status": "maintenance" if self.in_maintenance(c, now) else st.status,
                    "since": st.since, "latency_ms": st.latency_ms, "source": c.source,
                    "uptime": {"24h": self.uptime(st, 24, now), "7d": self.uptime(st, 24 * 7, now),

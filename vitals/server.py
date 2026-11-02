@@ -119,6 +119,9 @@ def make_handler(mon: Monitor):
                     return self._json({"error": str(e)}, 500)
                 mon.apply_config(config.load())
                 return self._json(settings_view(mon))
+            if method == "POST" and path == "/api/ack":
+                ok = mon.acknowledge(str((body or {}).get("id", "")), "page")
+                return self._json({"ok": ok} if ok else {"error": "that isn't down right now"}, 200 if ok else 409)
             if method == "POST" and path == "/api/settings/test":
                 n = next((n for n in mon.cfg.notifiers if n["name"] == (body or {}).get("notifier")), None)
                 if not n:
@@ -151,7 +154,7 @@ def make_handler(mon: Monitor):
         def do_POST(self):
             if self._push():
                 return
-            if urlparse(self.path).path.startswith("/api/settings"):
+            if urlparse(self.path).path.startswith("/api/settings") or urlparse(self.path).path == "/api/ack":
                 return self._settings_write("POST")
             if urlparse(self.path).path != "/api/report":
                 return self._send(404, b"not found", "text/plain")

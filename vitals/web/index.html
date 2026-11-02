@@ -58,6 +58,9 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .bars { display: grid; grid-template-columns: repeat(30, 6px); gap: 2px; height: 16px; }
 .bars i { border-radius: 2px; background: var(--none); }
 .bars i.ok { background: var(--ok); } .bars i.warn { background: var(--warn); } .bars i.bad { background: var(--bad); }
+.ack { font: inherit; font-size: 11.5px; padding: 2px 8px; border-radius: 7px; cursor: pointer;
+       border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
+.acked { font-size: 11.5px; color: var(--muted); }
 .filter { font: inherit; font-size: 14px; color: var(--text); background: var(--surface); border: 1px solid var(--border);
           border-radius: 9px; padding: 7px 11px; width: min(280px, 100%); }
 .incidents { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 4px 16px; }
@@ -123,12 +126,25 @@ function bars(c) {
   return `<div class="bars" aria-label="Daily uptime, last 30 days">${(c.bars || []).map((v, i) =>
     `<i class="${barTone(v)}" title="${v == null ? "no data" : pct(v)} · ${i === c.bars.length - 1 ? "today" : `${c.bars.length - 1 - i}d ago`}"></i>`).join("")}</div>`;
 }
+// Acknowledge: stops "still down" reminders for this outage (signed-in page only).
+function ackButton(c) {
+  if (c.status !== "down" || !data.full) return "";
+  return c.acked ? `<span class="acked">acknowledged</span>` : `<button class="ack" data-ack="${esc(c.id)}">Acknowledge</button>`;
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-ack]");
+  if (!b) return;
+  b.disabled = true;
+  await fetch("api/ack", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: b.dataset.ack }) });
+  load(true);
+});
+
 function row(c, now) {
   return `<div class="row ${esc(c.status)}">
     <div class="name"><span class="dot ${esc(c.status)}"></span><b title="${esc(c.target || c.name)}">${esc(c.name)}</b></div>
     <div class="right"><span class="lat">${c.latency_ms != null && c.status === "up" ? `${c.latency_ms} ms` : ""}</span>
       <span title="7d ${pct(c.uptime["7d"])} · 30d ${pct(c.uptime["30d"])} · 90d ${pct(c.uptime["90d"])}">${pct(c.uptime["30d"])}</span>
-      ${bars(c)}<span>${esc(statusWord(c, now))}</span></div>
+      ${bars(c)}<span>${esc(statusWord(c, now))}</span>${ackButton(c)}</div>
     ${c.status === "down" && c.detail ? `<div class="detail">${esc(c.detail)}</div>` : ""}
   </div>`;
 }
@@ -218,7 +234,7 @@ function render() {
 $("#filter").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); if (data) render(); });
 addEventListener("resize", () => data && render());
 
-async function load() {
+async function load(once = false) {
   try {
     const r = await fetch("api/status", { cache: "no-store" });
     if (r.ok) { data = await r.json(); render(); }
@@ -226,7 +242,7 @@ async function load() {
   } catch {
     $("#updated").textContent = "Can't reach Vitals — retrying";
   }
-  setTimeout(load, 15000);
+  if (!once) setTimeout(load, 15000);
 }
 load();
 </script>

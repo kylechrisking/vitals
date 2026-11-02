@@ -797,6 +797,25 @@ class Weekly(unittest.TestCase):
             m._restore()
 
 
+class Acknowledge(unittest.TestCase):
+    def test_ack_stops_reminders_until_recovery(self):
+        c = Check("web", "http", "x", fail_after=1)
+        m, sent = monitor(c, remind_every=30)
+        try:
+            m.record(c, Result(False), 1000.0)
+            self.assertTrue(m.acknowledge(c.id, "page", 1100.0))
+            m._remind(1000.0 + 31 * 60)
+            self.assertEqual([e["kind"] for e in sent], ["down"])
+            self.assertTrue(next(r for r in m.status(True)["checks"] if r["id"] == c.id)["acked"])
+            m.record(c, Result(True), 3000.0)
+            self.assertFalse(m.acknowledge(c.id))                   # nothing down to acknowledge
+            m.record(c, Result(False), 4000.0)
+            m._remind(4000.0 + 31 * 60)                              # a new outage reminds again
+            self.assertEqual([e["kind"] for e in sent], ["down", "up", "down", "reminder"])
+        finally:
+            m._restore()
+
+
 class Maintenance(unittest.TestCase):
     def test_daily_and_overnight_windows(self):
         from vitals.monitor import _in_daily_window
