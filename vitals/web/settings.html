@@ -75,6 +75,12 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
 .act .to b { color: var(--accent); font-weight: 600; }
 .cmd { display: flex; gap: 8px; margin: 6px 0 12px; }
 .cmd input { font-family: var(--mono); font-size: 12.5px; }
+.step { align-items: center; }
+.step .tick { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--border-2); display: inline-grid;
+              place-items: center; font-size: 11px; flex: none; }
+.step.done { color: var(--muted); }
+.step.done .tick { background: var(--ok); border-color: var(--ok); color: #fff; }
+.step a, [data-goto] { color: var(--accent); }
 .warn-box { border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); color: var(--warn); border-radius: 10px;
             padding: 9px 12px; font-size: 13px; margin-bottom: 4px; }
 .errors { border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); color: var(--warn); border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 13px; }
@@ -98,6 +104,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
   <section id="tab-notify">
     <h2>Where alerts go, and which ones</h2>
     <p class="lead">Each notifier gets only the kinds of alert you tick. Anything not sent anywhere still shows under Activity.</p>
+    <div id="setup"></div>
     <div id="notifiers"></div>
     <div class="card">
       <div class="card-head"><b>Add a notifier</b></div>
@@ -117,6 +124,7 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
     <p class="lead">A site is a group of hosts and services that share a network, power or a job, like everything on one UPS,
       or the media stack. It counts as <b>down</b> only when enough of its members are down <i>at the same time</i>, so one
       machine rebooting isn't a site outage.</p>
+    <div id="site-quick"></div>
     <div id="sites"></div>
     <div class="row-actions"><button class="btn" id="add-site">Add a site</button></div>
   </section>
@@ -339,6 +347,30 @@ function render() {
   $("#errors").textContent = [...warn, ...V.errors].join(" · ");
 
   const rows = notifierRows();
+  // Getting started: shown until there's somewhere to send alerts, a site, and a host reporting.
+  const siteCount = V.sites.length + D.sites.filter((s) => s.name && !V.sites.some((x) => x.name === s.name)).length;
+  const steps = [
+    [rows.some((r) => r.r.enabled !== false), "Add somewhere to send alerts (Discord, ntfy…)", "notify"],
+    [siteCount > 0, "Make a site: the group of things that together mean \"the lab is down\"", "sites"],
+    [V.hosts.length > 0, "Install the agent on a machine (one line, from the Hosts tab)", "hosts"],
+  ];
+  const done = steps.filter(([ok]) => ok).length;
+  $("#setup").innerHTML = done === steps.length ? "" : `<div class="card"><div class="card-head"><b>Getting started</b>
+      <span class="badge">${done} of ${steps.length} done</span></div><div class="checks">${steps.map(([ok, text, tab]) =>
+      `<div class="check step ${ok ? "done" : ""}"><span class="tick">${ok ? "✓" : ""}</span>${ok ? esc(text) : `<a href="#" data-goto="${tab}">${esc(text)}</a>`}</div>`).join("")}</div></div>`;
+
+  // Sites in one click: one per group of checks, down when half or more of it is.
+  const groups = {};
+  for (const c of V.checks.filter((c) => c.source !== "site" && c.source !== "agent")) (groups[c.group || "Checks"] ||= []).push(c.id);
+  if (V.hosts.length > 1) groups["All hosts"] = V.hosts.map((h) => `agent:${h.name}/host`);
+  const taken = new Set([...V.sites.map((s) => s.name), ...D.sites.map((s) => s.name)]);
+  const offers = Object.entries(groups).filter(([g, ids]) => ids.length > 1 && !taken.has(g));
+  $("#site-quick").innerHTML = offers.length ? `<div class="card"><div class="card-head"><b>Quick start</b></div>
+      <p class="lead" style="margin:0 0 10px">Make a site from a group in one click. It's down when half or more of the group is down at once; adjust after.</p>
+      <div class="row-actions" style="margin:0">${offers.map(([g, ids]) =>
+        `<button class="btn" data-quick-site="${esc(g)}">${esc(g)} (${ids.length})</button>`).join("")}</div></div>` : "";
+  $("#site-quick").dataset.groups = JSON.stringify(groups);
+
   $("#notifiers").innerHTML = rows.length ? rows.map((row, i) => notifierCard(row, row.config ? -1 : D.notifiers.indexOf(row.r))).join("")
     : `<div class="card empty">No notifiers yet. Add one below.</div>`;
 
@@ -506,6 +538,11 @@ document.addEventListener("change", (e) => {
   touch();
 });
 
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-goto]");
+  if (a) { e.preventDefault(); document.querySelector(`#tabs button[data-tab="${a.dataset.goto}"]`)?.click(); }
+});
+
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
@@ -538,6 +575,11 @@ document.addEventListener("click", async (e) => {
     touch(); render(); return;
   }
   if (b.dataset.delNotifier !== undefined) { D.notifiers.splice(+b.dataset.delNotifier, 1); touch(); render(); return; }
+  if (b.dataset.quickSite) {
+    const ids = JSON.parse($("#site-quick").dataset.groups)[b.dataset.quickSite] || [];
+    D.sites.push({ name: b.dataset.quickSite, address: "", members: ids, count: Math.max(1, Math.ceil(ids.length / 2)) });
+    touch(); render(); return;
+  }
   if (b.id === "add-maint") { D.maintenance.push({ name: "", days: [], from: "03:00", to: "03:30", checks: [] }); touch(); render(); return; }
   if (b.dataset.delMaint !== undefined) { D.maintenance.splice(+b.dataset.delMaint, 1); touch(); render(); return; }
   if (b.id === "add-site") { D.sites.push({ name: "", address: "", members: [], count: 1 }); touch(); render(); return; }
