@@ -21,5 +21,9 @@ else
 fi
 echo "$(date -Is) vitals: $msg"
 if [ -n "${VITALS_CHECKIN:-}" ]; then
+    # Right after a restart Vitals needs a few seconds before it answers: wait for it (up to a minute).
+    health="$(echo "$VITALS_CHECKIN" | sed 's#/api/push/.*#/healthz#')"
+    i=0
+    until curl -fsS -m 3 "$health" >/dev/null 2>&1 || [ $i -ge 30 ]; do sleep 2; i=$((i + 1)); done
     curl -fsS -m 10 --retry 3 "${VITALS_CHECKIN}?msg=$(echo "$msg" | tr ' ' '+')" >/dev/null || true
 fi
