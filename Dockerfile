@@ -4,6 +4,8 @@ LABEL org.opencontainers.image.title="vitals" \
       org.opencontainers.image.description="A small uptime and alert agent for homelabs and small offices" \
       org.opencontainers.image.licenses="MIT"
 
+ARG BUILD_SHA=""
+ENV VITALS_BUILD=$BUILD_SHA
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 VITALS_PORT=8098
 WORKDIR /app
 COPY vitals ./vitals

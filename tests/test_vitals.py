@@ -816,6 +816,22 @@ class Acknowledge(unittest.TestCase):
             m._restore()
 
 
+class Updates(unittest.TestCase):
+    def test_status(self):
+        from vitals import updates
+        updates.latest.clear()
+        os.environ["VITALS_BUILD"] = "aaaaaaa1111"
+        try:
+            self.assertIsNone(updates.status())                                   # nothing known yet
+            updates.latest.update(sha="aaaaaaa1111", message="x", date="d")
+            self.assertIsNone(updates.status())                                   # up to date
+            updates.latest.update(sha="bbbbbbb2222", message="weekly summary", date="d")
+            self.assertEqual(updates.status()["latest"], "bbbbbbb")
+        finally:
+            del os.environ["VITALS_BUILD"]
+            updates.latest.clear()
+
+
 class Maintenance(unittest.TestCase):
     def test_daily_and_overnight_windows(self):
         from vitals.monitor import _in_daily_window

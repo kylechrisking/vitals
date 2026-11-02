@@ -70,6 +70,7 @@ class Config:
     tokens: dict = field(default_factory=dict)           # name -> token for /api/* and the page
     agents: dict = field(default_factory=dict)           # [agents] host agents: token, thresholds, per-host overrides
     muted: set = field(default_factory=set)              # check ids that never notify
+    updates: dict = field(default_factory=dict)          # [updates] check = false, repo = "owner/name"
     push_secret: str = ""                                # derives check-in URLs (kept in tokens.json)
     made_tokens: dict = field(default_factory=dict)      # tokens Vitals made itself (no [tokens] / [agents] token)
     sites: list[dict] = field(default_factory=list)      # [[site]] name, address, members (check ids or names), count
@@ -102,6 +103,7 @@ def load() -> Config:
         public_status=bool(raw.get("public_status", False)),
         tokens={**raw.get("tokens", {}), **secrets.get("tokens", {})},
         agents={**raw.get("agents", {}), **secrets.get("agents", {})},
+        updates=raw.get("updates", {}),
         files={str(path): _mtime(path), str(secrets_path): _mtime(secrets_path)},
     )
     if env("SETT_URL"):

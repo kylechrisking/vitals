@@ -261,6 +261,7 @@ def settings_view(mon: Monitor) -> dict:
                              for w in cfg.maintenance if w not in (doc.get("maintenance") or [])],
         "can_save": settings.path() is not None, "title": cfg.title, "errors": cfg.errors,
         "persistent": config.data_persistent(),
+        "update": __import__("vitals.updates", fromlist=["status"]).status(),
     }
 
 
@@ -282,6 +283,8 @@ def lan_ip() -> str:
 def serve(mon: Monitor, port: int) -> None:
     httpd = ThreadingHTTPServer(("0.0.0.0", port), make_handler(mon))
     httpd.daemon_threads = True
+    from . import updates
+    updates.start(mon.cfg)
     mon.start()   # only once the page is listening, so a check of Vitals itself passes from the start
     log.info("status page on :%d%s", port, " (public)" if mon.cfg.public_status else "")
     if mon.cfg.made_tokens.get("page"):
