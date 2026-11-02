@@ -33,6 +33,8 @@ KEEP_BUCKETS = 24 * 90     # ...for 90 days
 KEEP_INCIDENTS = 500
 KEEP_ACTIVITY = 500
 SITE_EVERY = 15            # seconds between site evaluations
+BURST = 5                  # alerts a notifier gets in BURST_WINDOW before the rest are bundled
+BURST_WINDOW = 60
 SAVE_EVERY = 60
 
 
@@ -66,7 +68,9 @@ class Monitor:
         self.hosts: dict[str, dict] = {}  # agent name -> {"last": time, "report": doc, "summary": str, "ip": str}
         self.activity: deque = deque(maxlen=KEEP_ACTIVITY)   # every alert, sent or not, newest last
         self.disk_history: dict[str, dict[str, list]] = {}
-        self.last_weekly = 0.0                           # when the last weekly summary was due  # host -> disk -> [[time, used %], ...] hourly
+        self.last_weekly = 0.0                           # when the last weekly summary was due
+        self.sent_at: dict[str, list[float]] = {}        # notifier -> recent send times (flood protection)
+        self.bundled: dict[str, list[dict]] = {}         # notifier -> alerts held back for one bundle  # host -> disk -> [[time, used %], ...] hourly
         self.lock = threading.RLock()
         self.pool = ThreadPoolExecutor(max_workers=32, thread_name_prefix="check")
         self.running: set[str] = set()
@@ -223,6 +227,7 @@ class Monitor:
         self._weekly(now)
         self._remind(now)
         self._flush_held(now)
+        self._flush_bundles(now)
 
     # ---- check-ins from scheduled jobs -----------------------------------------------------
 
@@ -450,7 +455,30 @@ class Monitor:
                                                         "down_for")}
                                  | {"sent": [n["name"] for n in targets], "held": held, "muted": muted})
         for n in targets:
-            self.pool.submit(notify.send, n, ev, self.cfg.title)
+            self._send_or_bundle(n, ev, now)
+
+    def _send_or_bundle(self, n: dict, ev: dict, now: float) -> None:
+        """Flood protection: past BURST alerts in BURST_WINDOW seconds, a notifier's alerts are
+        held and go out as one message when the window has passed."""
+        with self.lock:
+            recent = [t for t in self.sent_at.get(n["name"], []) if now - t < BURST_WINDOW]
+            if len(recent) >= BURST:
+                self.bundled.setdefault(n["name"], []).append(ev)
+                self.sent_at[n["name"]] = recent
+                return
+            self.sent_at[n["name"]] = recent + [now]
+        self.pool.submit(notify.send, n, ev, self.cfg.title)
+
+    def _flush_bundles(self, now: float) -> None:
+        for n in self.cfg.notifiers:
+            evs = self.bundled.get(n["name"])
+            recent = [t for t in self.sent_at.get(n["name"], []) if now - t < BURST_WINDOW]
+            if not evs or len(recent) >= BURST:
+                continue
+            with self.lock:
+                self.bundled[n["name"]] = []
+                self.sent_at[n["name"]] = recent + [now]
+            self.pool.submit(notify.send, n, {"kind": "bundle", "at": now, "events": evs}, self.cfg.title)
 
     # ---- the weekly summary -----------------------------------------------------------------
 

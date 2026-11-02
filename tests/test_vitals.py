@@ -834,6 +834,24 @@ class Updates(unittest.TestCase):
             updates.latest.clear()
 
 
+class Flood(unittest.TestCase):
+    def test_bursts_are_bundled(self):
+        cs = [Check(f"svc{i}", "tcp", "x", fail_after=1) for i in range(12)]
+        m, sent = monitor(*cs)
+        try:
+            for c in cs:
+                m.record(c, Result(False), 1000.0)
+            self.assertEqual(len(sent), 5)                      # the first five go straight out
+            m._flush_bundles(1030.0)
+            self.assertEqual(len(sent), 5)                      # still inside the window
+            m._flush_bundles(1061.0)
+            self.assertEqual(sent[-1]["kind"], "bundle")
+            self.assertEqual(len(sent[-1]["events"]), 7)
+            self.assertEqual(notify.message(sent[-1], "Lab")[0], "Lab: 7 more alerts")
+        finally:
+            m._restore()
+
+
 class Maintenance(unittest.TestCase):
     def test_daily_and_overnight_windows(self):
         from vitals.monitor import _in_daily_window
