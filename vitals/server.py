@@ -11,6 +11,7 @@ import hmac
 import json
 import logging
 import re
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -119,6 +120,9 @@ def make_handler(mon: Monitor):
                     return self._json({"error": str(e)}, 500)
                 mon.apply_config(config.load())
                 return self._json(settings_view(mon))
+            if method == "POST" and path == "/api/settings/weekly-preview":
+                subject, body = notify.message(mon.weekly_summary(time.time()), mon.cfg.title)
+                return self._json({"subject": subject, "body": body})
             if method == "POST" and path == "/api/ack":
                 ok = mon.acknowledge(str((body or {}).get("id", "")), "page")
                 return self._json({"ok": ok} if ok else {"error": "that isn't down right now"}, 200 if ok else 409)

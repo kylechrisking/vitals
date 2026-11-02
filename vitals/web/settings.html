@@ -105,6 +105,8 @@ td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
     <h2>Where alerts go, and which ones</h2>
     <p class="lead">Each notifier gets only the kinds of alert you tick. Anything not sent anywhere still shows under Activity.</p>
     <div id="setup"></div>
+    <div class="row-actions" style="margin:0 0 12px"><button class="btn" id="weekly-preview">Preview weekly summary</button></div>
+    <pre id="weekly-text" class="card" style="white-space:pre-wrap;font:13px/1.5 var(--mono)" hidden></pre>
     <div id="notifiers"></div>
     <div class="card">
       <div class="card-head"><b>Add a notifier</b></div>
@@ -577,6 +579,13 @@ document.addEventListener("click", async (e) => {
     touch(); render(); return;
   }
   if (b.dataset.delNotifier !== undefined) { D.notifiers.splice(+b.dataset.delNotifier, 1); touch(); render(); return; }
+  if (b.id === "weekly-preview") {
+    const r = await fetch("api/settings/weekly-preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const d = await r.json().catch(() => ({}));
+    $("#weekly-text").hidden = false;
+    $("#weekly-text").textContent = r.ok ? `${d.subject}\n\n${d.body}` : `Couldn't build it (${r.status}).`;
+    return;
+  }
   if (b.dataset.quickSite) {
     const ids = JSON.parse($("#site-quick").dataset.groups)[b.dataset.quickSite] || [];
     D.sites.push({ name: b.dataset.quickSite, address: "", members: ids, count: Math.max(1, Math.ceil(ids.length / 2)) });
