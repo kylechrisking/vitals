@@ -7,10 +7,12 @@
 set -eu
 DIR="${VITALS_DIR:-$(cd "$(dirname "$0")" && pwd)}"
 cd "$DIR"
-before=$(docker compose images -q 2>/dev/null | sort | tr '\n' ' ')
+# Compare like with like: the full image ID each running container uses, against the full
+# ID of the image its compose file now points at (after the pull).
+running() { docker compose ps -q | xargs -r docker inspect -f '{{.Image}}' | sort | tr '\n' ' '; }
+wanted() { docker compose config --images | xargs -r -n1 docker image inspect -f '{{.Id}}' | sort | tr '\n' ' '; }
 docker compose pull -q
-after=$(docker compose config --images | xargs -r -n1 docker image inspect -f '{{.Id}}' 2>/dev/null | sort | tr '\n' ' ')
-if [ "$before" != "$after" ]; then
+if [ "$(running)" != "$(wanted)" ]; then
     docker compose up -d
     docker image prune -f >/dev/null
     msg="updated"
