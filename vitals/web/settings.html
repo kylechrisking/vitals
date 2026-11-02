@@ -401,7 +401,7 @@ function render() {
     const o = D.agents.hosts[h.name] || {};
     // Agents before 0.3 (from Brock) can't update themselves: those need the install line once.
     const ver = h.agent || "?";
-    const old = !h.agent || h.agent.split(".").map(Number) < [0, 3] || /^0\.[0-2]\./.test(h.agent);
+    const old = !h.agent || /^0\.[0-2]\./.test(h.agent);
     const agentBadge = ver === V.agent_version ? `<span class="badge ok">agent ${esc(ver)}</span>`
       : old ? `<span class="badge bad" title="Run the install line from Add a host on this machine">agent ${esc(ver)} · reinstall</span>`
       : `<span class="badge" title="It updates itself on its next report">agent ${esc(ver)} · updating</span>`;
