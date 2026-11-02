@@ -176,6 +176,12 @@ def clean(new: dict, old: dict) -> dict:
                 d[k] = (old_n.get(name) or old_n.get(n.get("was")) or {}).get(k, "")
         if d["type"] != "email" and not str(d.get("url", "")).startswith(("http://", "https://")):
             raise Invalid(f"{name}: the URL should start with http:// or https://")
+        url = str(d.get("url", ""))
+        if d["type"] == "discord" and "/api/webhooks/" not in url:
+            raise Invalid(f"{name}: that isn't a Discord webhook URL. In Discord: channel settings → Integrations → "
+                          "Webhooks → Copy Webhook URL (it contains /api/webhooks/)")
+        if d["type"] == "slack" and "hooks.slack.com" in url and "/services/" not in url:
+            raise Invalid(f"{name}: a Slack webhook URL looks like https://hooks.slack.com/services/...")
         if d["type"] == "gotify" and not d.get("token"):
             raise Invalid(f"{name}: Gotify needs an app token")
         if d["type"] == "email" and not (d.get("host") and d.get("to")):

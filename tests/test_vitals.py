@@ -584,7 +584,8 @@ class SettingsDoc(unittest.TestCase):
         for bad in ({"quiet": {"hours": "late"}},
                     {"notifiers": [{"name": "x", "type": "discord", "url": "ftp://x"}]},
                     {"notifiers": [{"name": "x", "type": "discord", "url": "https://x", "format": {"down": "{oops}"}}]},
-                    {"sites": [{"name": "S", "members": ["a"], "count": 5}]}):
+                    {"sites": [{"name": "S", "members": ["a"], "count": 5}]},
+                    {"notifiers": [{"name": "d", "type": "discord", "url": "https://discord.com/channels/1/2"}]}):
             with self.assertRaises(S.Invalid):
                 S.clean(bad, {})
 
