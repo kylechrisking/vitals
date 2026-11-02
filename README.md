@@ -214,6 +214,22 @@ scripts. `/healthz` answers `ok`.
 - Remote management: patching, installing software and a remote shell on
   the machines the agent runs on, so Vitals can fully replace Action1.
 
+## Keeping it up to date
+
+Agents update themselves. For the server, put [`tools/auto-update.sh`](tools/auto-update.sh)
+next to your compose file and run it nightly from cron on the Docker host:
+
+```bash
+curl -fsSL -o /opt/vitals/auto-update.sh https://raw.githubusercontent.com/kylechrisking/vitals/main/tools/auto-update.sh
+chmod +x /opt/vitals/auto-update.sh
+( crontab -l 2>/dev/null; echo '15 4 * * * /opt/vitals/auto-update.sh >> /var/log/vitals-update.log 2>&1' ) | crontab -
+```
+
+It pulls the newest image and restarts Vitals only when there's a new one. Add a
+"Check-in from a scheduled job" on the Checks tab (every 24 hours) and set its URL as
+`VITALS_CHECKIN=...` in the cron line: then Vitals tells you if the updater ever stops.
+Without this, Settings shows "Update available" when a newer version is out.
+
 ## Moving over from Uptime Kuma
 
 ```bash
